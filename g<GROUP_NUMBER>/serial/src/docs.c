@@ -13,26 +13,37 @@ typedef struct {
 } Document;
 
 typedef struct {
+    size_t count;
+    Document** inner;
+} Documents;
+
+typedef struct {
+    Document** documents;
+    size_t occupied;
+    size_t amount;
+    double* scores;
+} Cabinet;
+
+typedef struct {
+    size_t count;
+    Cabinet** inner;
+} Cabinets;
+
+typedef struct {
     size_t cabinet_count;
     size_t document_count;
     size_t subject_count;
     Document** documents;
 } Problem;
 
-typedef struct {
-    Document** documents;
-    size_t occupied;
-    size_t amount;
-} Cabinet;
-
-void free_cabinets(Cabinet** cabinets, size_t count);
-void print_cabinets(Cabinet** cabinets, size_t count);
-void assign_to_cabinets(Cabinet** cabinets, Problem* problem);
+void free_cabinets(Cabinets cabinets);
+void print_cabinets(Cabinets cabinets);
+void assign_to_cabinets(Cabinets cabinets, Documents documents);
 void assign_to_cabinet(Cabinet* cabinet, Document* document);
 
 bool parse_problem(char* filename, Problem* p);
-void free_problem(Problem* p);
-void print_problem(Problem* p);
+void free_problem(Problem p);
+void print_problem(Problem p);
 
 int main(int argc, char *argv[]) {
 
@@ -47,56 +58,66 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    Cabinet** cabinets = malloc(problem.cabinet_count * sizeof(Cabinet*));
-    if (cabinets == NULL) goto cleanup;
+    print_problem(problem);
+
+    Documents documents;
+    documents.inner = problem.documents;
+    documents.count = problem.document_count;
+
+    Cabinets cabinets;
+    cabinets.count = problem.cabinet_count;
+    cabinets.inner = malloc(problem.cabinet_count * sizeof(Cabinet*));
+    if (cabinets.inner == NULL) goto cleanup;
+
     for (size_t i = 0; i < problem.cabinet_count; i++) {
-        cabinets[i] = malloc(sizeof(Cabinet));
-        if (cabinets[i] == NULL) goto cleanup;
+        cabinets.inner[i] = malloc(sizeof(Cabinet));
+        if (cabinets.inner[i] == NULL) goto cleanup;
     }
 
-    assign_to_cabinets(cabinets, &problem);
+    assign_to_cabinets(cabinets, documents);
+    print_cabinets(cabinets);
     //do {
-    //    calculate_cabinet_averages();
+    //    calculate_cabinet_averages(cabinets);
     //} while(reassign_documents());
 
     cleanup:
-    free_problem(&problem);
-    free_cabinets(cabinets, problem.cabinet_count);
+    free_problem(problem);
+    free_cabinets(cabinets);
 
     return 0;
 }
 
-void free_cabinets(Cabinet** cabinets, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        if (cabinets[i] == NULL) {
+void free_cabinets(Cabinets cabinets) {
+    for (size_t i = 0; i < cabinets.count; i++) {
+        if (cabinets.inner[i] == NULL) {
             continue;
         }
 
-        if (cabinets[i]->documents != NULL) {
-            free(cabinets[i]->documents);
+        if (cabinets.inner[i]->documents != NULL) {
+            free(cabinets.inner[i]->documents);
         }
-        free(cabinets[i]);
+        free(cabinets.inner[i]);
     }
-    free(cabinets);
+    free(cabinets.inner);
 }
 
-void print_cabinets(Cabinet** cabinets, size_t count) {
+void print_cabinets(Cabinets cabinets) {
     printf("CABINETS:\n");
 
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < cabinets.count; i++) {
         printf("\t%zu ->", i);
 
-        for (size_t j = 0; j < cabinets[i]->occupied; j++) {
-            printf(" %zu", cabinets[i]->documents[j]->id);
+        for (size_t j = 0; j < cabinets.inner[i]->occupied; j++) {
+            printf(" %zu", cabinets.inner[i]->documents[j]->id);
         }
         printf("\n");
     }
 }
 
-void assign_to_cabinets(Cabinet** cabinets, Problem* problem) {
+void assign_to_cabinets(Cabinets cabinets, Documents documents) {
 
-    for (size_t i = 0; i < problem->document_count; i++) {
-        assign_to_cabinet(cabinets[i % problem->cabinet_count], problem->documents[i]);
+    for (size_t i = 0; i < documents.count; i++) {
+        assign_to_cabinet(cabinets.inner[i % cabinets.count], documents.inner[i]);
     }
 }
 
@@ -174,39 +195,38 @@ bool parse_problem(char* filename, Problem* p) {
         fclose(file);
     }
 
-    if (!status) free_problem(p);
+    if (!status) free_problem(*p);
 
     return status;
 }
 
-void free_problem(Problem* p) {
+void free_problem(Problem p) {
     printf("Closing problem ...\n");
 
-    if (!p) return;
-    if (!p->documents) return;
+    if (!p.documents) return;
 
-    for (size_t i = 0; i < p->document_count; i++) {
-        if (p->documents[i] != NULL) {
-            if (p->documents[i]->scores != NULL) {
-                free(p->documents[i]->scores);
+    for (size_t i = 0; i < p.document_count; i++) {
+        if (p.documents[i] != NULL) {
+            if (p.documents[i]->scores != NULL) {
+                free(p.documents[i]->scores);
             }
-            free(p->documents[i]);
+            free(p.documents[i]);
         }
     }
 
-    free(p->documents);
+    free(p.documents);
 }
 
-void print_problem(Problem* p) {
-    printf("Cabinets: %zu\n", p->cabinet_count);
-    printf("Documents: %zu\n", p->document_count);
-    printf("Subjects: %zu\n", p->subject_count);
+void print_problem(Problem p) {
+    printf("Cabinets: %zu\n", p.cabinet_count);
+    printf("Documents: %zu\n", p.document_count);
+    printf("Subjects: %zu\n", p.subject_count);
 
     printf("Documents:\n");
-    for (size_t i = 0; i < p->document_count; i++) {
-        printf("\tId: %zu \tScores:", p->documents[i]->id);
-        for (size_t j = 0; j < p->subject_count; j++) {
-            printf(" %lf", p->documents[i]->scores[j]);
+    for (size_t i = 0; i < p.document_count; i++) {
+        printf("\tId: %zu \tScores:", p.documents[i]->id);
+        for (size_t j = 0; j < p.subject_count; j++) {
+            printf(" %lf", p.documents[i]->scores[j]);
         }
         printf("\n");
     }

@@ -1,14 +1,14 @@
-CC=gcc
+CXX=/opt/homebrew/bin/g++-15
 TARGET=docs
-CFLAGS=-O2
+CXXFLAGS=-O2 -std=c++17 -fopenmp
 
 all: clean $(TARGET)
 
-warn: CFLAGS += -Wall -Wextra
+warn: CXXFLAGS += -Wall -Wextra
 warn: clean $(TARGET)
 
 $(TARGET):
-	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).c
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(TARGET).cpp
 
 clean:
 	rm -f $(TARGET)

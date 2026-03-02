@@ -63,7 +63,7 @@ void print_result(const Documents &documents);
 int main(const int argc, char *argv[]) {
 
     if (argc != 2) {
-        fprintf(stderr, "Invalid number of arguments.");
+        //fprintf(stderr, "Invalid number of arguments.");
         return 1;
     }
 
@@ -197,8 +197,8 @@ bool parse_problem(char* filename, Problem* p) {
     FILE* file = fopen(filename, "r");
     if (!file) {
         status = false;
-        fprintf(stderr, "Error opening file '%s' for reading: %s\n", filename,
-            strerror(errno));
+        //fprintf(stderr, "Error opening file '%s' for reading: %s\n", filename,
+        //strerror(errno));
         goto cleanup;
     }
 
@@ -206,7 +206,7 @@ bool parse_problem(char* filename, Problem* p) {
     if (!fgets(line, 1024, file) ||
         !sscanf(line, "%zu %zu %zu", &p->cabinet_count, &p->document_count, &p->subject_count)) {
         status = false;
-        fprintf(stderr, "Error reading first line of file\n");
+        //fprintf(stderr, "Error reading first line of file\n");
         goto cleanup;
     }
 
@@ -219,14 +219,14 @@ bool parse_problem(char* filename, Problem* p) {
 
         if (!fgets(line, 1024, file)) {
             status = false;
-            fprintf(stderr, "Error %zu-th document line\n", i);
+            //fprintf(stderr, "Error %zu-th document line\n", i);
             goto cleanup;
         }
 
         char* token = strtok(line, " ");
         if (token == NULL) {
             status = false;
-            fprintf(stderr, "Error extracting id token from %zu-th document line\n", i);
+            //fprintf(stderr, "Error extracting id token from %zu-th document line\n", i);
             goto cleanup;
         }
 
@@ -236,8 +236,8 @@ bool parse_problem(char* filename, Problem* p) {
             token = strtok(NULL, " ");
             if (token == NULL) {
                 status = false;
-                fprintf(stderr, "Error extracting %zu-th score token from %zu-th"
-                    " document line\n", j, i);
+                //fprintf(stderr, "Error extracting %zu-th score token from %zu-th"
+                //" document line\n", j, i);
                 goto cleanup;
             }
             p->document_scores[p->subject_count * i + j] = strtod(token, NULL);

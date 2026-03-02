@@ -97,7 +97,7 @@ int main(const int argc, char *argv[]) {
     } while (reassign_documents(cabinets, documents, problem.subject_count));
 
     exec_time += omp_get_wtime();
-    fprintf(stderr, "%.1fs\n", exec_time);
+    //fprintf(stderr, "%.1fs\n", exec_time);
     print_result(documents);
 
     cleanup:

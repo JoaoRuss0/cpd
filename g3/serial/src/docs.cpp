@@ -5,7 +5,6 @@ using namespace std;
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cerrno>
 #include <cmath>
 #include <vector>
 #include <omp.h>

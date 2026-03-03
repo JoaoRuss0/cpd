@@ -55,8 +55,6 @@ void free_problem(const Problem &p);
 void free_cabinets(const Cabinets &cabinets);
 
 bool parse_problem(char* filename, Problem* p);
-void print_problem(const Problem &p);
-void print_cabinets(const Cabinets &cabinets, size_t subject_count);
 void print_result(const Documents &documents);
 
 int main(const int argc, char *argv[]) {
@@ -69,8 +67,6 @@ int main(const int argc, char *argv[]) {
     Problem problem;
     bool status = parse_problem(argv[1], &problem);
     if (!status) goto cleanup;
-
-    //print_problem(problem);
 
     double exec_time;
 
@@ -256,37 +252,4 @@ bool parse_problem(char* filename, Problem* p) {
 void free_problem(const Problem &p) {
     free (p.document_scores);
     free (p.documents);
-}
-
-void print_cabinets(const Cabinets &cabinets, size_t subject_count) {
-    printf("CABINETS:\n");
-
-    for (size_t i = 0; i < cabinets.count; i++) {
-        printf("\t%zu ->", i);
-        for (auto document : cabinets.inner[i].documents) {
-            printf(" %zu", i);
-        }
-
-        printf("\n\tScore ->");
-        for (size_t j = 0; j < subject_count; j++) {
-            printf(" %f", cabinets.scores[j]);
-        }
-        printf("\n");
-    }
-}
-
-void print_problem(const Problem &p) {
-    printf("Cabinets: %zu\n", p.cabinet_count);
-    printf("Documents: %zu\n", p.document_count);
-    printf("Subjects: %zu\n", p.subject_count);
-
-    printf("Documents:\n");
-    for (size_t i = 0; i < p.document_count; i++) {
-        printf("\tId: %zu \tScores:", i);
-        for (size_t j = 0; j < p.subject_count; j++) {
-            printf(" %lf", p.document_scores[i * p.subject_count + j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
 }

@@ -1,6 +1,6 @@
-CXX=/opt/homebrew/bin/g++-15
-TARGET=docs
-CXXFLAGS=-O2 -std=c++17 -fopenmp
+CXX = g++-15
+TARGET = docs
+CXXFLAGS = -O2 -std=c++17 -fopenmp
 
 all: clean $(TARGET)
 

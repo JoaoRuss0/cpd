@@ -1,5 +1,3 @@
-using namespace std;
-
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -8,6 +6,8 @@ using namespace std;
 #include <cmath>
 #include <vector>
 #include <omp.h>
+
+using namespace std;
 
 typedef struct Cabinet Cabinet;
 typedef struct Document Document;
@@ -22,7 +22,7 @@ struct Document {
 
 struct Cabinet {
     size_t id;
-    std::vector<size_t> documents;
+    vector<size_t> documents;
 };
 
 struct Documents{
@@ -60,8 +60,7 @@ void print_result(const Documents &documents);
 int main(const int argc, char *argv[]) {
 
     if (argc != 2) {
-        //fprintf(stderr, "Invalid number of arguments.");
-        return 1;
+        return 1; // By specification should be 1 argument.
     }
 
     Problem problem;
@@ -78,8 +77,9 @@ int main(const int argc, char *argv[]) {
     Cabinets cabinets;
     cabinets.count = problem.cabinet_count;
     cabinets.scores = static_cast<double*>(calloc(problem.cabinet_count * problem.subject_count, sizeof(double)));
+
     if(!cabinets.scores) goto cleanup;
-    cabinets.inner = new Cabinet[problem.cabinet_count];;
+    cabinets.inner = new Cabinet[problem.cabinet_count];
     if(!cabinets.inner) goto cleanup;
 
     for (size_t i = 0; i < problem.cabinet_count; i++) cabinets.inner[i].id = i;
@@ -92,6 +92,7 @@ int main(const int argc, char *argv[]) {
     } while (reassign_documents(cabinets, documents, problem.subject_count));
 
     exec_time += omp_get_wtime();
+
     fprintf(stderr, "%.1fs\n", exec_time);
     print_result(documents);
 
@@ -110,7 +111,7 @@ void print_result(const Documents &documents) {
 }
 
 bool reassign_documents(const Cabinets &cabinets, const Documents &documents, size_t subject_count) {
-    std::vector<vector<size_t>> to_reassign(cabinets.count);
+    vector<vector<size_t>> to_reassign(cabinets.count);
 
     bool swaps = false;
 
@@ -159,6 +160,7 @@ void calculate_cabinet_averages(const Cabinets &cabinets, size_t subject_count, 
         if (cabinets.inner[i].documents.empty()) {
             continue;
         }
+
         for (auto document_id : cabinets.inner[i].documents) {
             for (size_t k = 0; k < subject_count; k++) {
                 cabinets.scores[i * subject_count + k] += documents.scores[subject_count * document_id + k];
@@ -166,9 +168,10 @@ void calculate_cabinet_averages(const Cabinets &cabinets, size_t subject_count, 
         }
 
         for (size_t k = 0; k < subject_count; k++) {
-            cabinets.scores[i * subject_count + k] /= (double) cabinets.inner[i].documents.size();
+            cabinets.scores[i * subject_count + k] /= static_cast<double>(cabinets.inner[i].documents.size());
         }
     }
+
 }
 
 void free_cabinets(const Cabinets &cabinets) {

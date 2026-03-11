@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 #include <omp.h>
 
 typedef struct Document Document;
@@ -35,16 +36,16 @@ struct Problem {
     double* document_scores;
 };
 
-void assign_to_cabinets(Cabinets* cabinets, Documents* documents, const size_t subject_count);
+void assign_to_cabinets(const Cabinets* cabinets, const Documents* documents, size_t subject_count);
 double calculate_distance(size_t subject_count, const double* score_1, const double* score_2);
-bool reassign_documents(Cabinets* cabinets, Documents* documents, size_t subject_count);
+bool reassign_documents(const Cabinets* cabinets, const Documents* documents, size_t subject_count);
 
-void free_problem(const Problem &p);
+void free_problem(const Problem* p);
 
 bool parse_problem(const char* filename, Problem* p);
-void print_problem(const Problem &p);
-void print_cabinets(const Cabinets &cabinets, size_t subject_count);
-void print_result(const Documents &documents);
+void print_problem(const Problem* p);
+void print_cabinets(const Cabinets* cabinets, size_t subject_count);
+void print_result(const Documents* documents);
 
 int main(const int argc, char *argv[]) {
 
@@ -65,7 +66,7 @@ int main(const int argc, char *argv[]) {
 
     Cabinets cabinets;
     cabinets.count = problem.cabinet_count;
-    cabinets.scores = static_cast<double*>(calloc(problem.cabinet_count * problem.subject_count, sizeof(double)));
+    cabinets.scores = (double*) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
     if(!cabinets.scores) goto cleanup;
 
     exec_time = -omp_get_wtime();
@@ -77,16 +78,16 @@ int main(const int argc, char *argv[]) {
 
     exec_time += omp_get_wtime();
     fprintf(stderr, "%.1fs\n", exec_time);
-    print_result(documents);
+    print_result(&documents);
 
     cleanup:
-    free_problem(problem);
+    free_problem(&problem);
     free(cabinets.scores);
 
     return 0;
 }
 
-bool reassign_documents(Cabinets* cabinets, Documents* documents, size_t subject_count) {
+bool reassign_documents(const Cabinets* cabinets, const Documents* documents, const size_t subject_count) {
     double* new_cabinet_subject_score_sum = (double*) calloc(cabinets->count * subject_count, sizeof(double));
     if (!new_cabinet_subject_score_sum) return false;
 
@@ -136,7 +137,7 @@ bool reassign_documents(Cabinets* cabinets, Documents* documents, size_t subject
     return swaps;
 }
 
-double calculate_distance(size_t subject_count, const double* score_1, const double* score_2) {
+double calculate_distance(const size_t subject_count, const double* score_1, const double* score_2) {
 
     double sum = 0;
 #pragma omp simd reduction(+:sum)
@@ -147,7 +148,7 @@ double calculate_distance(size_t subject_count, const double* score_1, const dou
     return sum;
 }
 
-void assign_to_cabinets(Cabinets* cabinets, Documents* documents, const size_t subject_count) {
+void assign_to_cabinets(const Cabinets* cabinets, const Documents* documents, const size_t subject_count) {
 
     double* new_cabinet_subject_score_sum = (double*) calloc(cabinets->count * subject_count, sizeof(double));
     size_t new_cabinet_document_count[cabinets->count];
@@ -177,10 +178,10 @@ void assign_to_cabinets(Cabinets* cabinets, Documents* documents, const size_t s
     }
 }
 
-void print_result(const Documents &documents) {
+void print_result(const Documents* documents) {
 
-    for (size_t i = 0; i < documents.count; i++) {
-        printf("%zu\n", documents.inner[i].parent_id);
+    for (size_t i = 0; i < documents->count; i++) {
+        printf("%zu\n", documents->inner[i].parent_id);
     }
 }
 
@@ -200,9 +201,9 @@ bool parse_problem(const char* filename, Problem* p) {
         goto cleanup;
     }
 
-    p->documents = static_cast<Document *>(calloc(p->document_count, sizeof(Document)));
+    p->documents = (Document*) calloc(p->document_count, sizeof(Document));
     if (!p->documents) goto cleanup;
-    p->document_scores = static_cast<double *>(calloc(p->document_count * p->subject_count, sizeof(double)));
+    p->document_scores = (double*) calloc(p->document_count * p->subject_count, sizeof(double));
     if (!p->document_scores) goto cleanup;
 
     for(size_t i = 0; i < p->document_count; i++) {
@@ -235,40 +236,40 @@ bool parse_problem(const char* filename, Problem* p) {
         fclose(file);
     }
 
-    if (!status) free_problem(*p);
+    if (!status) free_problem(p);
 
     return status;
 }
 
-void free_problem(const Problem &p) {
-    if (p.document_scores) free(p.document_scores);
-    if (p.documents) free(p.documents);
+void free_problem(const Problem* p) {
+    if (p->document_scores) free(p->document_scores);
+    if (p->documents) free(p->documents);
 }
 
-void print_cabinets(const Cabinets &cabinets, size_t subject_count) {
+void print_cabinets(const Cabinets *cabinets, const size_t subject_count) {
     printf("CABINETS:\n");
 
-    for (size_t i = 0; i < cabinets.count; i++) {
+    for (size_t i = 0; i < cabinets->count; i++) {
         printf("\t%zu ->", i);
 
         printf("\n\tScore ->");
         for (size_t j = 0; j < subject_count; j++) {
-            printf(" %f", cabinets.scores[j]);
+            printf(" %f", cabinets->scores[j]);
         }
         printf("\n");
     }
 }
 
-void print_problem(const Problem &p) {
-    printf("Cabinets: %zu\n", p.cabinet_count);
-    printf("Documents: %zu\n", p.document_count);
-    printf("Subjects: %zu\n", p.subject_count);
+void print_problem(const Problem* p) {
+    printf("Cabinets: %zu\n", p->cabinet_count);
+    printf("Documents: %zu\n", p->document_count);
+    printf("Subjects: %zu\n", p->subject_count);
 
     printf("Documents:\n");
-    for (size_t i = 0; i < p.document_count; i++) {
+    for (size_t i = 0; i < p->document_count; i++) {
         printf("\tId: %zu \tScores:", i);
-        for (size_t j = 0; j < p.subject_count; j++) {
-            printf(" %lf", p.document_scores[i * p.subject_count + j]);
+        for (size_t j = 0; j < p->subject_count; j++) {
+            printf(" %lf", p->document_scores[i * p->subject_count + j]);
         }
         printf("\n");
     }

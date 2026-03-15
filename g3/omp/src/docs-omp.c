@@ -36,6 +36,9 @@ struct Problem {
     double *document_scores;
 };
 
+double *new_cabinet_subject_score_sum;
+size_t *new_cabinet_document_count;
+
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
 
 double calculate_distance(size_t subject_count, const double *score_1, const double *score_2);
@@ -73,8 +76,14 @@ int main(const int argc, char *argv[]) {
     cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
     if (!cabinets.scores) goto cleanup;
 
+    new_cabinet_subject_score_sum = (double *) calloc(cabinets.count * problem.subject_count, sizeof(double));
+    if (!new_cabinet_subject_score_sum) goto cleanup;
+    new_cabinet_document_count = (size_t *)calloc(cabinets.count * problem.document_count, sizeof(size_t));
+    if (!new_cabinet_document_count) goto cleanup;
+
     exec_time = -omp_get_wtime();
 
+# pragma omp parallel
     assign_to_cabinets(&cabinets, &documents, problem.subject_count);
     do {
         reassigned = reassign_documents(&cabinets, &documents, problem.subject_count);
@@ -88,21 +97,19 @@ int main(const int argc, char *argv[]) {
 cleanup:
     free_problem(&problem);
     free(cabinets.scores);
+    free(new_cabinet_subject_score_sum);
+    free(new_cabinet_document_count);
 
     return 0;
 }
 
 bool reassign_documents(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
-    double *new_cabinet_subject_score_sum = (double *) calloc(cabinets->count * subject_count, sizeof(double));
-    if (!new_cabinet_subject_score_sum) return false;
-
-    size_t new_cabinet_document_count[cabinets->count];
+    memset(new_cabinet_subject_score_sum, 0, cabinets->count * subject_count * sizeof(double));
     memset(new_cabinet_document_count, 0, sizeof(size_t) * cabinets->count);
 
     bool swaps = false;
 
-# pragma omp parallel for reduction(|:swaps)
-
+#pragma omp for
     for (size_t i = 0; i < documents->count; i++) {
         double min_distance = INFINITY;
         size_t new_cabinet_index = documents->inner[i].parent_id;
@@ -120,22 +127,22 @@ bool reassign_documents(const Cabinets *cabinets, const Documents *documents, co
             }
         }
 
-        swaps |= new_cabinet_index != documents->inner[i].parent_id;
         documents->inner[i].parent_id = new_cabinet_index;
 
-#pragma omp critical
-        {
-            new_cabinet_document_count[new_cabinet_index] += 1;
+#pragma omp atomic
+        swaps |= new_cabinet_index != documents->inner[i].parent_id;
 
-#pragma omp simd
-            for (size_t j = 0; j < subject_count; j++) {
-                new_cabinet_subject_score_sum[new_cabinet_index * subject_count + j] += documents->scores[
-                    i * subject_count + j];
-            }
+#pragma omp atomic
+        new_cabinet_document_count[new_cabinet_index] += 1;
+
+        for (size_t j = 0; j < subject_count; j++) {
+#pragma omp atomic
+            new_cabinet_subject_score_sum[new_cabinet_index * subject_count + j] += documents->scores[
+                i * subject_count + j];
         }
     }
 
-# pragma omp parallel for
+#pragma omp for
     for (size_t i = 0; i < cabinets->count; i++) {
         for (size_t j = 0; j < subject_count; j++) {
             if (new_cabinet_document_count[i] == 0) continue;
@@ -144,46 +151,41 @@ bool reassign_documents(const Cabinets *cabinets, const Documents *documents, co
         }
     }
 
-    free(new_cabinet_subject_score_sum);
     return swaps;
 }
 
 double calculate_distance(const size_t subject_count, const double *score_1, const double *score_2) {
     double sum = 0;
-#pragma omp simd reduction(+:sum)
+
     for (size_t i = 0; i < subject_count; i++) {
         const double diff = score_1[i] - score_2[i];
         sum += diff * diff;
     }
+
     return sum;
 }
 
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
-    double *new_cabinet_subject_score_sum = (double *) calloc(cabinets->count * subject_count, sizeof(double));
-    size_t new_cabinet_document_count[cabinets->count];
-    memset(new_cabinet_document_count, 0, sizeof(size_t) * cabinets->count);
 
-#pragma omp parallel for
+#pragma omp for
     for (size_t i = 0; i < documents->count; i++) {
         const size_t index = i % cabinets->count;
         documents->inner[i].parent_id = index;
 
-#pragma omp critical
-        {
-            new_cabinet_document_count[index] += 1;
+#pragma omp atomic
+        new_cabinet_document_count[index] += 1;
 
-#pragma omp simd
-            for (size_t j = 0; j < subject_count; j++) {
-                new_cabinet_subject_score_sum[index * subject_count + j] += documents->scores[i * subject_count + j];
-            }
+        for (size_t j = 0; j < subject_count; j++) {
+#pragma omp atomic
+            new_cabinet_subject_score_sum[index * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 
+#pragma omp for
     for (size_t i = 0; i < cabinets->count; i++) {
         for (size_t j = 0; j < subject_count; j++) {
             if (new_cabinet_document_count[i] == 0) continue;
-            cabinets->scores[i * subject_count + j] =
-                    new_cabinet_subject_score_sum[i * subject_count + j] / (double) new_cabinet_document_count[i];
+            cabinets->scores[i * subject_count + j] = new_cabinet_subject_score_sum[i * subject_count + j] / (double) new_cabinet_document_count[i]; ;
         }
     }
 }

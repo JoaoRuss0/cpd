@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#include <stdbool.h>
 #include <omp.h>
 
 typedef struct Document Document;
@@ -27,7 +26,7 @@ struct Cabinets {
     size_t count;
     double *scores;
     double *scores_sum;
-    size_t* document_counts;
+    size_t *document_counts;
 };
 
 struct Problem {
@@ -38,9 +37,10 @@ struct Problem {
     double *document_scores;
 };
 
-size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count);
+size_t get_closest_cabinet_index(const Cabinets *cabinets, Document *document, double *document_scores,
+                                 size_t subject_count);
 
-void recalculate_scores(const Cabinets* cabinets, size_t subject_count);
+void recalculate_scores(const Cabinets *cabinets, size_t subject_count);
 
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
 
@@ -83,13 +83,13 @@ int main(const int argc, char *argv[]) {
     exec_time = -omp_get_wtime();
 
 #pragma omp parallel
-{
-    assign_to_cabinets(&cabinets, &documents, problem.subject_count);
-    do {
-        recalculate_scores(&cabinets, problem.subject_count);
-        reassign_documents(&cabinets, &documents, problem.subject_count);
-    } while (swaps > 0);
-}
+    {
+        assign_to_cabinets(&cabinets, &documents, problem.subject_count);
+        do {
+            recalculate_scores(&cabinets, problem.subject_count);
+            reassign_documents(&cabinets, &documents, problem.subject_count);
+        } while (swaps > 0);
+    }
 
     exec_time += omp_get_wtime();
 
@@ -106,7 +106,6 @@ cleanup:
 }
 
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
-
     // We can not use "nowait" since we need to know all the documents that belong to a cabinet before calculating its scores
 #pragma omp for
     for (size_t i = 0; i < documents->count; i++) {
@@ -123,8 +122,7 @@ void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, co
     }
 }
 
-void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
-
+void recalculate_scores(const Cabinets *cabinets, const size_t subject_count) {
     // We can not use "nowait" since we need to know the cabinet scores before calculating if a document is to be moved
 
 #pragma omp for
@@ -134,7 +132,8 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
                 memset(&cabinets->scores[i*subject_count], 0, subject_count * sizeof(double));
                 break;
             }
-            cabinets->scores[i*subject_count +j] = cabinets->scores_sum[i * subject_count + j] / (double) cabinets->document_counts[i];
+            cabinets->scores[i * subject_count + j] =
+                    cabinets->scores_sum[i * subject_count + j] / (double) cabinets->document_counts[i];
         }
     }
 }
@@ -149,7 +148,9 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
 #pragma omp for reduction(+:swaps)
     for (size_t i = 0; i < documents->count; i++) {
         const size_t old_cabinet_index = documents->inner[i].parent_id;
-        const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, &documents->inner[i], &documents->scores[i * subject_count], subject_count);
+        const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, &documents->inner[i],
+                                                                   &documents->scores[i * subject_count],
+                                                                   subject_count);
         if (new_cabinet_index == old_cabinet_index) {
             continue;
         }
@@ -173,13 +174,14 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
     }
 }
 
-size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count) {
-
+size_t get_closest_cabinet_index(const Cabinets *cabinets, Document *document, double *document_scores,
+                                 size_t subject_count) {
     double min_distance = INFINITY;
     size_t new_cabinet_index = document->parent_id;
 
     for (size_t j = 0; j < cabinets->count; j++) {
-        const double distance = calculate_distance(subject_count,&cabinets->scores[j * subject_count],document_scores);
+        const double distance =
+                calculate_distance(subject_count, &cabinets->scores[j * subject_count], document_scores);
 
         if (distance < min_distance) {
             min_distance = distance;

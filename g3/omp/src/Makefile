@@ -1,6 +1,6 @@
 CC=gcc-15
 TARGET=docs-omp
-CCFLAGS=-O2 -fopenmp -g
+CCFLAGS=-O2 -fopenmp
 
 all: clean $(TARGET)
 

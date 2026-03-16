@@ -9,6 +9,7 @@ for input in inputs/*.in; do
 
   ./$1 "$input" > "$base-new.out"
   diff -u "$base.out" "$base-new.out"
+  rm "$base-new.out"
 done
 
 echo "All tests passed."

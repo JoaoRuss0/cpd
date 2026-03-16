@@ -140,7 +140,7 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
 
         double* score = &cabinets->scores[c * subject_count];
         if (count == 0) {
-            memset(&score, 0, subject_count * sizeof(double));
+            memset(score, 0, subject_count * sizeof(double));
             continue;
         }
 

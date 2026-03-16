@@ -56,6 +56,10 @@ int swaps = 0;
 size_t *new_counts = NULL;
 double *new_scores = NULL;
 
+int n_threads = 0;
+int thread_number = 0;
+#pragma omp threadprivate(thread_number)
+
 int main(const int argc, char *argv[]) {
     if (argc != 2) {
         return 1;
@@ -65,6 +69,8 @@ int main(const int argc, char *argv[]) {
 
     Problem problem;
     if (!parse_problem(argv[1], &problem)) goto cleanup;
+
+    n_threads = omp_get_max_threads();
 
     Documents documents;
     documents.count = problem.document_count;
@@ -76,15 +82,17 @@ int main(const int argc, char *argv[]) {
     cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
     if (!cabinets.scores) goto cleanup;
 
-    new_counts = (size_t *) calloc(problem.cabinet_count, sizeof(size_t));
+    new_counts = (size_t *) calloc(problem.cabinet_count * n_threads, sizeof(size_t));
     if (!new_counts) goto cleanup;
-    new_scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
+    new_scores = (double *) calloc(problem.cabinet_count * problem.subject_count * n_threads, sizeof(double));
     if (!new_scores) goto cleanup;
 
     exec_time = -omp_get_wtime();
 
 #pragma omp parallel
 {
+    thread_number = omp_get_thread_num();
+
     assign_to_cabinets(&cabinets, &documents, problem.subject_count);
     do {
         recalculate_scores(&cabinets, problem.subject_count);
@@ -108,45 +116,49 @@ cleanup:
 
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
 
-    // We can not use "nowait" since we need to know all the documents that belong to a cabinet before calculating its scores
+// We can not use "nowait" since we need to know all the documents that belong to a cabinet before calculating its scores
 #pragma omp for
     for (size_t i = 0; i < documents->count; i++) {
         const size_t index = i % cabinets->count;
         documents->inner[i].parent_id = index;
 
-#pragma omp atomic
-        new_counts[index] += 1;
-
+        new_counts[thread_number * cabinets->count + index] += 1;
         for (size_t j = 0; j < subject_count; j++) {
-#pragma omp atomic
-            new_scores[index * subject_count + j] += documents->scores[i * subject_count + j];
+            new_scores[(thread_number * cabinets->count + index) * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 }
 
 void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
-
-    // We can not use "nowait" since we need to know the cabinet scores before calculating if a document is to be moved
-
+// We can not use "nowait" since we need to know the cabinet scores before calculating if a document is to be moved
 #pragma omp for
-    for (size_t i = 0; i < cabinets->count; i++) {
-        for (size_t j = 0; j < subject_count; j++) {
-            if (new_counts[i] == 0) {
-                memset(&cabinets->scores[i*subject_count], 0, subject_count * sizeof(double));
-                break;
+    for (size_t c = 0; c < cabinets->count; c++) {
+        size_t count = 0;
+        for (size_t t = 0; t < n_threads; t++) {
+            count += new_counts[t * cabinets->count + c];
+        }
+
+        if (count == 0) {
+            memset(&cabinets->scores[c * subject_count], 0, subject_count * sizeof(double));
+            continue;
+        }
+
+        for (size_t s = 0; s < subject_count; s++) {
+            double sum = 0.0;
+            for (size_t t = 0; t < n_threads; t++) {
+                sum += new_scores[(t * cabinets->count + c) * subject_count + s];
             }
-            cabinets->scores[i * subject_count +j] = new_scores[i * subject_count + j] / (double) new_counts[i];
+            cabinets->scores[c * subject_count + s] = sum / (double)count;
         }
     }
 }
 
 void reassign_documents(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
 #pragma omp single
-{
-    memset(new_counts, 0, sizeof(size_t) * cabinets->count);
-    memset(new_scores, 0, sizeof(double) * cabinets->count * subject_count);
     swaps = 0;
-}
+
+    memset(&new_scores[thread_number * cabinets->count * subject_count], 0, cabinets->count * subject_count * sizeof(double));
+    memset(&new_counts[thread_number * cabinets->count], 0, cabinets->count * sizeof(size_t));
 
     // We have to wait for all swaps to be summed up, since a single thread's documents might not be moved (hence swaps = 0)
     // but another thread's assigned documents might, and we would be quitting the while cycle if we used "nowait"
@@ -160,13 +172,10 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
         }
 
         documents->inner[i].parent_id = new_cabinet_index;
-
-#pragma omp atomic
-        new_counts[new_cabinet_index] += 1;
+        new_counts[thread_number * cabinets->count + new_cabinet_index] += 1;
 
         for (size_t j = 0; j < subject_count; j++) {
-#pragma omp atomic
-            new_scores[new_cabinet_index * subject_count + j] += documents->scores[i * subject_count + j];
+            new_scores[(thread_number * cabinets->count + new_cabinet_index) * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 }

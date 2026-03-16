@@ -25,8 +25,8 @@ for test_dir in T*; do
 
     total=$((total + 1))
 
-    input=$(find "$test_dir" -name "*.in")
-    expected=$(find "$test_dir" -name "*.out")
+    input=$(find "$test_dir" -maxdepth 1 -name "*.in")
+    expected=$(find "$test_dir" -maxdepth 1 -name "*.out" ! -name "result.out")
 
     produced="$test_dir/result.out"
     timefile="$test_dir/time.txt"

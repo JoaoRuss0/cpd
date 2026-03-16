@@ -26,6 +26,8 @@ struct Documents {
 struct Cabinets {
     size_t count;
     double *scores;
+    double *scores_sum;
+    size_t* document_counts;
 };
 
 struct Problem {
@@ -36,31 +38,29 @@ struct Problem {
     double *document_scores;
 };
 
-double *new_cabinet_subject_score_sum;
-size_t *new_cabinet_document_count;
+size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count);
+
+void recalculate_scores(const Cabinets* cabinets, size_t subject_count);
 
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
 
 double calculate_distance(size_t subject_count, const double *score_1, const double *score_2);
 
-bool reassign_documents(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
+void reassign_documents(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
 
 void free_problem(const Problem *p);
 
 bool parse_problem(const char *filename, Problem *p);
 
-void print_problem(const Problem *p);
-
-void print_cabinets(const Cabinets *cabinets, size_t subject_count);
-
 void print_result(const Documents *documents);
+
+int swaps = 0;
 
 int main(const int argc, char *argv[]) {
     if (argc != 2) {
         return 1;
     }
 
-    bool reassigned = false;
     double exec_time;
 
     Problem problem;
@@ -75,19 +75,21 @@ int main(const int argc, char *argv[]) {
     cabinets.count = problem.cabinet_count;
     cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
     if (!cabinets.scores) goto cleanup;
-
-    new_cabinet_subject_score_sum = (double *) calloc(cabinets.count * problem.subject_count, sizeof(double));
-    if (!new_cabinet_subject_score_sum) goto cleanup;
-    new_cabinet_document_count = (size_t *)calloc(cabinets.count * problem.document_count, sizeof(size_t));
-    if (!new_cabinet_document_count) goto cleanup;
+    cabinets.scores_sum = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
+    if (!cabinets.scores_sum) goto cleanup;
+    cabinets.document_counts = (size_t *) calloc(problem.cabinet_count, sizeof(size_t));
+    if (!cabinets.document_counts) goto cleanup;
 
     exec_time = -omp_get_wtime();
 
-# pragma omp parallel
+#pragma omp parallel
+{
     assign_to_cabinets(&cabinets, &documents, problem.subject_count);
     do {
-        reassigned = reassign_documents(&cabinets, &documents, problem.subject_count);
-    } while (reassigned);
+        recalculate_scores(&cabinets, problem.subject_count);
+        reassign_documents(&cabinets, &documents, problem.subject_count);
+    } while (swaps > 0);
+}
 
     exec_time += omp_get_wtime();
 
@@ -96,62 +98,96 @@ int main(const int argc, char *argv[]) {
 
 cleanup:
     free_problem(&problem);
-    free(cabinets.scores);
-    free(new_cabinet_subject_score_sum);
-    free(new_cabinet_document_count);
+    if (cabinets.scores) free(cabinets.scores);
+    if (cabinets.scores_sum) free(cabinets.scores_sum);
+    if (cabinets.document_counts) free(cabinets.document_counts);
 
     return 0;
 }
 
-bool reassign_documents(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
-    memset(new_cabinet_subject_score_sum, 0, cabinets->count * subject_count * sizeof(double));
-    memset(new_cabinet_document_count, 0, sizeof(size_t) * cabinets->count);
+void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
 
-    bool swaps = false;
-
+    // We can not use "nowait" since we need to know all the documents that belong to a cabinet before calculating its scores
 #pragma omp for
     for (size_t i = 0; i < documents->count; i++) {
-        double min_distance = INFINITY;
-        size_t new_cabinet_index = documents->inner[i].parent_id;
-
-        for (size_t j = 0; j < cabinets->count; j++) {
-            const double distance = calculate_distance(
-                subject_count,
-                &cabinets->scores[j * subject_count],
-                &documents->scores[i * subject_count]
-            );
-
-            if (distance < min_distance) {
-                min_distance = distance;
-                new_cabinet_index = j;
-            }
-        }
-
-        documents->inner[i].parent_id = new_cabinet_index;
+        const size_t index = i % cabinets->count;
+        documents->inner[i].parent_id = index;
 
 #pragma omp atomic
-        swaps |= new_cabinet_index != documents->inner[i].parent_id;
-
-#pragma omp atomic
-        new_cabinet_document_count[new_cabinet_index] += 1;
+        cabinets->document_counts[index] += 1;
 
         for (size_t j = 0; j < subject_count; j++) {
 #pragma omp atomic
-            new_cabinet_subject_score_sum[new_cabinet_index * subject_count + j] += documents->scores[
-                i * subject_count + j];
+            cabinets->scores_sum[index * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
+}
+
+void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
+
+    // We can not use "nowait" since we need to know the cabinet scores before calculating if a document is to be moved
 
 #pragma omp for
     for (size_t i = 0; i < cabinets->count; i++) {
         for (size_t j = 0; j < subject_count; j++) {
-            if (new_cabinet_document_count[i] == 0) continue;
-            cabinets->scores[i * subject_count + j] =
-                    new_cabinet_subject_score_sum[i * subject_count + j] / (double) new_cabinet_document_count[i];
+            if (cabinets->document_counts[i] == 0) {
+                memset(&cabinets->scores[i*subject_count], 0, subject_count * sizeof(double));
+                break;
+            }
+            cabinets->scores[i*subject_count +j] = cabinets->scores_sum[i * subject_count + j] / (double) cabinets->document_counts[i];
+        }
+    }
+}
+
+void reassign_documents(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
+#pragma omp barrier
+#pragma omp single
+    swaps = 0;
+
+    // We have to wait for all swaps to be summed up, since a single thread's documents might not be moved (hence swaps = 0)
+    // but another thread's assigned documents might, and we would be quitting the while cycle if we used "nowait"
+#pragma omp for reduction(+:swaps)
+    for (size_t i = 0; i < documents->count; i++) {
+        const size_t old_cabinet_index = documents->inner[i].parent_id;
+        const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, &documents->inner[i], &documents->scores[i * subject_count], subject_count);
+        if (new_cabinet_index == old_cabinet_index) {
+            continue;
+        }
+
+        swaps += 1;
+        documents->inner[i].parent_id = new_cabinet_index;
+
+#pragma omp atomic
+        cabinets->document_counts[new_cabinet_index] += 1;
+#pragma omp atomic
+        cabinets->document_counts[old_cabinet_index] -= 1;
+
+        for (size_t j = 0; j < subject_count; j++) {
+#pragma omp atomic
+            cabinets->scores_sum[new_cabinet_index * subject_count + j] += documents->scores[
+                i * subject_count + j];
+#pragma omp atomic
+            cabinets->scores_sum[old_cabinet_index * subject_count + j] -= documents->scores[
+                i * subject_count + j];
+        }
+    }
+}
+
+size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count) {
+
+    double min_distance = INFINITY;
+    size_t new_cabinet_index = document->parent_id;
+
+    for (size_t j = 0; j < cabinets->count; j++) {
+        const double distance = calculate_distance(subject_count,&cabinets->scores[j * subject_count],document_scores);
+
+        if (distance < min_distance) {
+            min_distance = distance;
+            new_cabinet_index = j;
         }
     }
 
-    return swaps;
+    return new_cabinet_index;
 }
 
 double calculate_distance(const size_t subject_count, const double *score_1, const double *score_2) {
@@ -163,31 +199,6 @@ double calculate_distance(const size_t subject_count, const double *score_1, con
     }
 
     return sum;
-}
-
-void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
-
-#pragma omp for
-    for (size_t i = 0; i < documents->count; i++) {
-        const size_t index = i % cabinets->count;
-        documents->inner[i].parent_id = index;
-
-#pragma omp atomic
-        new_cabinet_document_count[index] += 1;
-
-        for (size_t j = 0; j < subject_count; j++) {
-#pragma omp atomic
-            new_cabinet_subject_score_sum[index * subject_count + j] += documents->scores[i * subject_count + j];
-        }
-    }
-
-#pragma omp for
-    for (size_t i = 0; i < cabinets->count; i++) {
-        for (size_t j = 0; j < subject_count; j++) {
-            if (new_cabinet_document_count[i] == 0) continue;
-            cabinets->scores[i * subject_count + j] = new_cabinet_subject_score_sum[i * subject_count + j] / (double) new_cabinet_document_count[i]; ;
-        }
-    }
 }
 
 void print_result(const Documents *documents) {
@@ -241,10 +252,7 @@ bool parse_problem(const char *filename, Problem *p) {
     }
 
 cleanup:
-    if (file) {
-        fclose(file);
-    }
-
+    if (file)fclose(file);
     if (!status) free_problem(p);
 
     return status;
@@ -253,34 +261,4 @@ cleanup:
 void free_problem(const Problem *p) {
     if (p->document_scores) free(p->document_scores);
     if (p->documents) free(p->documents);
-}
-
-void print_cabinets(const Cabinets *cabinets, const size_t subject_count) {
-    printf("CABINETS:\n");
-
-    for (size_t i = 0; i < cabinets->count; i++) {
-        printf("\t%zu ->", i);
-
-        printf("\n\tScore ->");
-        for (size_t j = 0; j < subject_count; j++) {
-            printf(" %f", cabinets->scores[j]);
-        }
-        printf("\n");
-    }
-}
-
-void print_problem(const Problem *p) {
-    printf("Cabinets: %zu\n", p->cabinet_count);
-    printf("Documents: %zu\n", p->document_count);
-    printf("Subjects: %zu\n", p->subject_count);
-
-    printf("Documents:\n");
-    for (size_t i = 0; i < p->document_count; i++) {
-        printf("\tId: %zu \tScores:", i);
-        for (size_t j = 0; j < p->subject_count; j++) {
-            printf(" %lf", p->document_scores[i * p->subject_count + j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
 }

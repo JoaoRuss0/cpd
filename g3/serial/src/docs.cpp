@@ -89,6 +89,8 @@ int main(const int argc, char *argv[]) {
     assign_to_cabinets(cabinets, problem.documents, problem.document_count);
     do {
         calculate_cabinet_averages(cabinets, problem.subject_count, documents);
+        print_result(documents);
+        printf("\n");
     } while (reassign_documents(cabinets, documents, problem.subject_count));
 
     exec_time += omp_get_wtime();

@@ -1,14 +1,14 @@
-CXX = g++-15
-TARGET = docs
-CXXFLAGS = -O2 -std=c++17 -fopenmp
+CC=gcc-15
+TARGET=docs
+CCFLAGS=-O2 -fopenmp -g
 
 all: clean $(TARGET)
 
-warn: CXXFLAGS += -Wall -Wextra
+warn: CCFLAGS += -Wall -Wextra
 warn: clean $(TARGET)
 
 $(TARGET):
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(TARGET).cpp
+	$(CC) $(CCFLAGS) -o $(TARGET) $(TARGET).c
 
 clean:
 	rm -f $(TARGET)

@@ -1,15 +1,12 @@
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <vector>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
 #include <omp.h>
 
-using namespace std;
-
-typedef struct Cabinet Cabinet;
 typedef struct Document Document;
 typedef struct Cabinets Cabinets;
 typedef struct Documents Documents;
@@ -20,54 +17,54 @@ struct Document {
     size_t parent_id;
 };
 
-struct Cabinet {
-    size_t id;
-    vector<size_t> documents;
+struct Documents {
+    size_t count;
+    Document *inner;
+    double *scores;
 };
 
-struct Documents{
+struct Cabinets {
     size_t count;
-    Document* inner;
-    double* scores;
-};
-
-struct Cabinets{
-    size_t count;
-    Cabinet* inner;
-    double* scores;
+    double *scores;
 };
 
 struct Problem {
     size_t cabinet_count;
     size_t document_count;
     size_t subject_count;
-    Document* documents;
-    double* document_scores;
+    Document *documents;
+    double *document_scores;
 };
 
-void assign_to_cabinets(const Cabinets &cabinets, Document* documents, size_t document_count);
-void calculate_cabinet_averages(const Cabinets &cabinets, size_t subject_count, const Documents &documents);
-double calculate_distance(size_t subject_count, const double* score_1, const double* score_2);
-bool reassign_documents(const Cabinets &cabinets, const Documents &documents, size_t subject_count);
-void move_document_to_cabinet(Document* document, Cabinet* to_cabinet);
+size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count);
 
-void free_problem(const Problem &p);
-void free_cabinets(const Cabinets &cabinets);
+void recalculate_scores(const Cabinets* cabinets, size_t subject_count);
 
-bool parse_problem(char* filename, Problem* p);
-void print_result(const Documents &documents);
+void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
+
+double calculate_distance(size_t subject_count, const double *score_1, const double *score_2);
+
+void reassign_documents(const Cabinets *cabinets, const Documents *documents, size_t subject_count);
+
+void free_problem(const Problem *p);
+
+bool parse_problem(const char *filename, Problem *p);
+
+void print_result(const Documents *documents);
+
+int swaps = 0;
+size_t *new_counts = NULL;
+double *new_scores = NULL;
 
 int main(const int argc, char *argv[]) {
-
     if (argc != 2) {
-        return 1; // By specification should be 1 argument.
+        return 1;
     }
 
-    Problem problem;
-    bool status = parse_problem(argv[1], &problem);
-    if (!status) goto cleanup;
-
     double exec_time;
+
+    Problem problem;
+    if (!parse_problem(argv[1], &problem)) goto cleanup;
 
     Documents documents;
     documents.count = problem.document_count;
@@ -76,129 +73,126 @@ int main(const int argc, char *argv[]) {
 
     Cabinets cabinets;
     cabinets.count = problem.cabinet_count;
-    cabinets.scores = static_cast<double*>(calloc(problem.cabinet_count * problem.subject_count, sizeof(double)));
+    cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
+    if (!cabinets.scores) goto cleanup;
 
-    if(!cabinets.scores) goto cleanup;
-    cabinets.inner = new Cabinet[problem.cabinet_count];
-    if(!cabinets.inner) goto cleanup;
-
-    for (size_t i = 0; i < problem.cabinet_count; i++) cabinets.inner[i].id = i;
+    new_counts = (size_t *) calloc(problem.cabinet_count, sizeof(size_t));
+    if (!new_counts) goto cleanup;
+    new_scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
+    if (!new_scores) goto cleanup;
 
     exec_time = -omp_get_wtime();
 
-    assign_to_cabinets(cabinets, problem.documents, problem.document_count);
+    assign_to_cabinets(&cabinets, &documents, problem.subject_count);
     do {
-        calculate_cabinet_averages(cabinets, problem.subject_count, documents);
-        print_result(documents);
-        printf("\n");
-    } while (reassign_documents(cabinets, documents, problem.subject_count));
+        recalculate_scores(&cabinets, problem.subject_count);
+        reassign_documents(&cabinets, &documents, problem.subject_count);
+    } while (swaps > 0);
 
     exec_time += omp_get_wtime();
 
     fprintf(stderr, "%.1fs\n", exec_time);
-    print_result(documents);
+    print_result(&documents);
 
-    cleanup:
-    free_problem(problem);
-    free_cabinets(cabinets);
+cleanup:
+    free_problem(&problem);
+    if (cabinets.scores) free(cabinets.scores);
+    if (new_counts) free(new_counts);
+    if (new_scores) free(new_scores);
 
     return 0;
 }
 
-void print_result(const Documents &documents) {
+void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
 
-    for (size_t i = 0; i < documents.count; i++) {
-        printf("%zu\n", documents.inner[i].parent_id);
-    }
-}
+    for (size_t i = 0; i < documents->count; i++) {
+        const size_t index = i % cabinets->count;
+        documents->inner[i].parent_id = index;
 
-bool reassign_documents(const Cabinets &cabinets, const Documents &documents, size_t subject_count) {
-    vector<vector<size_t>> to_reassign(cabinets.count);
-
-    bool swaps = false;
-
-    for (size_t i = 0; i < documents.count; i++) {
-        double min_distance = INFINITY;
-        size_t new_cabinet_index = 0;
-
-        for (size_t j = 0; j < cabinets.count; j++) {
-            double distance = calculate_distance(subject_count, &cabinets.scores[j * subject_count],
-                                                 &documents.scores[i * subject_count]);
-            if (distance < min_distance) {
-                min_distance = distance;
-                new_cabinet_index = j;
-            }
+        new_counts[index] += 1;
+        for (size_t j = 0; j < subject_count; j++) {
+            new_scores[index * subject_count + j] += documents->scores[i * subject_count + j];
         }
-        swaps |= new_cabinet_index != documents.inner[i].parent_id;
-
-        to_reassign[new_cabinet_index].push_back(documents.inner[i].id);
     }
-
-    for (size_t i = 0; i < cabinets.count; i++) {
-        for (const size_t document_id : to_reassign[i]) {
-            documents.inner[document_id].parent_id = i;
-        }
-        cabinets.inner[i].documents.swap(to_reassign[i]);
-    }
-
-    return swaps;
 }
 
-double calculate_distance(size_t subject_count, const double* score_1, const double* score_2) {
+void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
 
-    double sum = 0;
-    for (size_t i = 0; i < subject_count; i++) {
-        double diff = score_1[i] - score_2[i];
-        sum += diff * diff;
-    }
-    return sum;
-}
-
-void calculate_cabinet_averages(const Cabinets &cabinets, size_t subject_count, const Documents &documents) {
-
-    memset(cabinets.scores, 0, sizeof(double) * cabinets.count * subject_count);
-
-    for (size_t i = 0; i < cabinets.count; i++) {
-        if (cabinets.inner[i].documents.empty()) {
+    memset(cabinets->scores, 0, cabinets->count * subject_count * sizeof(double));
+    for (size_t c = 0; c < cabinets->count; c++) {
+        double *score = &cabinets->scores[c * subject_count];
+        if (new_counts[c] == 0) {
+            memset(score, 0, subject_count * sizeof(double));
             continue;
         }
 
-        for (auto document_id : cabinets.inner[i].documents) {
-            for (size_t k = 0; k < subject_count; k++) {
-                cabinets.scores[i * subject_count + k] += documents.scores[subject_count * document_id + k];
-            }
+        for (size_t s = 0; s < subject_count; s++) {
+            score[s] = new_scores[c * subject_count + s] / (double) new_counts[c];
+        }
+    }
+}
+
+void reassign_documents(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
+    swaps = 0;
+    memset(new_scores, 0, cabinets->count * subject_count * sizeof(double));
+    memset(new_counts, 0, cabinets->count * sizeof(size_t));
+
+    for (size_t i = 0; i < documents->count; i++) {
+        const size_t old_cabinet_index = documents->inner[i].parent_id;
+        const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, &documents->inner[i], &documents->scores[i * subject_count], subject_count);
+
+        if (new_cabinet_index != old_cabinet_index) {
+            swaps += 1;
         }
 
-        for (size_t k = 0; k < subject_count; k++) {
-            cabinets.scores[i * subject_count + k] /= static_cast<double>(cabinets.inner[i].documents.size());
+        documents->inner[i].parent_id = new_cabinet_index;
+        new_counts[new_cabinet_index] += 1;
+
+        for (size_t j = 0; j < subject_count; j++) {
+            new_scores[new_cabinet_index * subject_count + j] += documents->scores[i * subject_count + j];
+        }
+    }
+}
+
+size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count) {
+
+    double min_distance = INFINITY;
+    size_t new_cabinet_index = document->parent_id;
+
+    for (size_t j = 0; j < cabinets->count; j++) {
+        const double distance = calculate_distance(subject_count,&cabinets->scores[j * subject_count],document_scores);
+
+        if (distance < min_distance) {
+            min_distance = distance;
+            new_cabinet_index = j;
         }
     }
 
+    return new_cabinet_index;
 }
 
-void free_cabinets(const Cabinets &cabinets) {
-    free(cabinets.scores);
-    //free(cabinets.inner);
-    delete[] cabinets.inner;
+double calculate_distance(const size_t subject_count, const double *score_1, const double *score_2) {
+    double sum = 0;
+
+    for (size_t i = 0; i < subject_count; i++) {
+        const double diff = score_1[i] - score_2[i];
+        sum += diff * diff;
+    }
+
+    return sum;
 }
 
-void assign_to_cabinets(const Cabinets &cabinets, Document* documents, const size_t document_count) {
-
-    for (size_t i = 0; i < document_count; i++) {
-        Cabinet* parent = &cabinets.inner[i % cabinets.count];
-        parent->documents.push_back(documents[i].id);
-        documents[i].parent_id = parent->id;
+void print_result(const Documents *documents) {
+    for (size_t i = 0; i < documents->count; i++) {
+        printf("%zu\n", documents->inner[i].parent_id);
     }
 }
 
-bool parse_problem(char* filename, Problem* p) {
-
+bool parse_problem(const char *filename, Problem *p) {
     bool status = true;
-    FILE* file = fopen(filename, "r");
+    FILE *file = fopen(filename, "r");
     if (!file) {
         status = false;
-        //fprintf(stderr, "Error opening file '%s' for reading: %s\n", filename,
-        //strerror(errno));
         goto cleanup;
     }
 
@@ -206,55 +200,46 @@ bool parse_problem(char* filename, Problem* p) {
     if (!fgets(line, 1024, file) ||
         !sscanf(line, "%zu %zu %zu", &p->cabinet_count, &p->document_count, &p->subject_count)) {
         status = false;
-        //fprintf(stderr, "Error reading first line of file\n");
         goto cleanup;
     }
 
-    p->documents = static_cast<Document *>(calloc(p->document_count, sizeof(Document)));
+    p->documents = (Document *) calloc(p->document_count, sizeof(Document));
     if (!p->documents) goto cleanup;
-    p->document_scores = static_cast<double *>(calloc(p->document_count * p->subject_count, sizeof(double)));
+    p->document_scores = (double *) calloc(p->document_count * p->subject_count, sizeof(double));
     if (!p->document_scores) goto cleanup;
 
-    for(size_t i = 0; i < p->document_count; i++) {
-
+    for (size_t i = 0; i < p->document_count; i++) {
         if (!fgets(line, 1024, file)) {
             status = false;
-            //fprintf(stderr, "Error %zu-th document line\n", i);
             goto cleanup;
         }
 
-        char* token = strtok(line, " ");
+        char *token = strtok(line, " ");
         if (token == NULL) {
             status = false;
-            //fprintf(stderr, "Error extracting id token from %zu-th document line\n", i);
             goto cleanup;
         }
 
         p->documents[i].id = i;
 
-        for(size_t j = 0; j < p->subject_count ; j++) {
+        for (size_t j = 0; j < p->subject_count; j++) {
             token = strtok(NULL, " ");
             if (token == NULL) {
                 status = false;
-                //fprintf(stderr, "Error extracting %zu-th score token from %zu-th"
-                //" document line\n", j, i);
                 goto cleanup;
             }
             p->document_scores[p->subject_count * i + j] = strtod(token, NULL);
         }
     }
 
-    cleanup:
-    if (file) {
-        fclose(file);
-    }
-
-    if (!status) free_problem(*p);
+cleanup:
+    if (file)fclose(file);
+    if (!status) free_problem(p);
 
     return status;
 }
 
-void free_problem(const Problem &p) {
-    free (p.document_scores);
-    free (p.documents);
+void free_problem(const Problem *p) {
+    if (p->document_scores) free(p->document_scores);
+    if (p->documents) free(p->documents);
 }

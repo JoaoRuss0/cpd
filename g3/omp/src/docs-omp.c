@@ -138,8 +138,9 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
             count += new_counts[t * cabinets->count + c];
         }
 
+        double* score = &cabinets->scores[c * subject_count];
         if (count == 0) {
-            memset(&cabinets->scores[c * subject_count], 0, subject_count * sizeof(double));
+            memset(&score, 0, subject_count * sizeof(double));
             continue;
         }
 
@@ -148,7 +149,7 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
             for (size_t t = 0; t < n_threads; t++) {
                 sum += new_scores[(t * cabinets->count + c) * subject_count + s];
             }
-            cabinets->scores[c * subject_count + s] = sum / (double)count;
+             score[s] = sum / (double)count;
         }
     }
 }

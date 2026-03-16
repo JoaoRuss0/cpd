@@ -1,6 +1,6 @@
-CC=/opt/homebrew/bin/g++-15
+CC=gcc-15
 TARGET=docs-omp
-CCFLAGS=-O2 -fopenmp
+CCFLAGS=-O2 -fopenmp -g
 
 all: clean $(TARGET)
 

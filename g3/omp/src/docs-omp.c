@@ -26,8 +26,6 @@ struct Documents {
 struct Cabinets {
     size_t count;
     double *scores;
-    double *scores_sum;
-    size_t* document_counts;
 };
 
 struct Problem {
@@ -55,6 +53,8 @@ bool parse_problem(const char *filename, Problem *p);
 void print_result(const Documents *documents);
 
 int swaps = 0;
+size_t *new_counts = NULL;
+double *new_scores = NULL;
 
 int main(const int argc, char *argv[]) {
     if (argc != 2) {
@@ -75,10 +75,11 @@ int main(const int argc, char *argv[]) {
     cabinets.count = problem.cabinet_count;
     cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
     if (!cabinets.scores) goto cleanup;
-    cabinets.scores_sum = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
-    if (!cabinets.scores_sum) goto cleanup;
-    cabinets.document_counts = (size_t *) calloc(problem.cabinet_count, sizeof(size_t));
-    if (!cabinets.document_counts) goto cleanup;
+
+    new_counts = (size_t *) calloc(problem.cabinet_count, sizeof(size_t));
+    if (!new_counts) goto cleanup;
+    new_scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
+    if (!new_scores) goto cleanup;
 
     exec_time = -omp_get_wtime();
 
@@ -99,8 +100,8 @@ int main(const int argc, char *argv[]) {
 cleanup:
     free_problem(&problem);
     if (cabinets.scores) free(cabinets.scores);
-    if (cabinets.scores_sum) free(cabinets.scores_sum);
-    if (cabinets.document_counts) free(cabinets.document_counts);
+    if (new_counts) free(new_counts);
+    if (new_scores) free(new_scores);
 
     return 0;
 }
@@ -114,11 +115,11 @@ void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, co
         documents->inner[i].parent_id = index;
 
 #pragma omp atomic
-        cabinets->document_counts[index] += 1;
+        new_counts[index] += 1;
 
         for (size_t j = 0; j < subject_count; j++) {
 #pragma omp atomic
-            cabinets->scores_sum[index * subject_count + j] += documents->scores[i * subject_count + j];
+            new_scores[index * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 }
@@ -130,19 +131,22 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
 #pragma omp for
     for (size_t i = 0; i < cabinets->count; i++) {
         for (size_t j = 0; j < subject_count; j++) {
-            if (cabinets->document_counts[i] == 0) {
+            if (new_counts[i] == 0) {
                 memset(&cabinets->scores[i*subject_count], 0, subject_count * sizeof(double));
                 break;
             }
-            cabinets->scores[i*subject_count +j] = cabinets->scores_sum[i * subject_count + j] / (double) cabinets->document_counts[i];
+            cabinets->scores[i * subject_count +j] = new_scores[i * subject_count + j] / (double) new_counts[i];
         }
     }
 }
 
 void reassign_documents(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
-#pragma omp barrier
 #pragma omp single
+{
+    memset(new_counts, 0, sizeof(size_t) * cabinets->count);
+    memset(new_scores, 0, sizeof(double) * cabinets->count * subject_count);
     swaps = 0;
+}
 
     // We have to wait for all swaps to be summed up, since a single thread's documents might not be moved (hence swaps = 0)
     // but another thread's assigned documents might, and we would be quitting the while cycle if we used "nowait"
@@ -150,25 +154,19 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
     for (size_t i = 0; i < documents->count; i++) {
         const size_t old_cabinet_index = documents->inner[i].parent_id;
         const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, &documents->inner[i], &documents->scores[i * subject_count], subject_count);
-        if (new_cabinet_index == old_cabinet_index) {
-            continue;
+
+        if (new_cabinet_index != old_cabinet_index) {
+            swaps += 1;
         }
 
-        swaps += 1;
         documents->inner[i].parent_id = new_cabinet_index;
 
 #pragma omp atomic
-        cabinets->document_counts[new_cabinet_index] += 1;
-#pragma omp atomic
-        cabinets->document_counts[old_cabinet_index] -= 1;
+        new_counts[new_cabinet_index] += 1;
 
         for (size_t j = 0; j < subject_count; j++) {
 #pragma omp atomic
-            cabinets->scores_sum[new_cabinet_index * subject_count + j] += documents->scores[
-                i * subject_count + j];
-#pragma omp atomic
-            cabinets->scores_sum[old_cabinet_index * subject_count + j] -= documents->scores[
-                i * subject_count + j];
+            new_scores[new_cabinet_index * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 }

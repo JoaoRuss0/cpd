@@ -7,6 +7,10 @@
 #include <stdbool.h>
 #include <omp.h>
 
+#define CACHE_LINE_SIZE_IN_BYTES 64
+#define SIZE_T_PER_CACHE_LINE (CACHE_LINE_SIZE_IN_BYTES / sizeof(size_t))
+#define DOUBLE_PER_CACHE_LINE (CACHE_LINE_SIZE_IN_BYTES / sizeof(double))
+
 typedef struct Document Document;
 typedef struct Cabinets Cabinets;
 typedef struct Documents Documents;
@@ -50,11 +54,22 @@ void free_problem(const Problem *p);
 
 bool parse_problem(const char *filename, Problem *p);
 
+size_t get_allocation_size(size_t single_count, size_t block_size) {
+    // - 1 is used whenever we add to a count which is divisible by the block size
+    // (otherwise, we would allocate an "empty" block)
+    // 10 doubles; block size is 6 -> we need 2 whole blocks (2 empty doubles)
+    // 12 doubles; block size is 6 -> we need 2 whole blocks (no empty doubles)
+    return ((block_size + single_count - 1) / block_size) * block_size;
+}
+
 void print_result(const Documents *documents);
 
 int swaps = 0;
 size_t *new_counts = NULL;
 double *new_scores = NULL;
+
+size_t padded_count_per_thread;
+size_t padded_cabinet_subject_scores_per_thread;
 
 int n_threads = 0;
 int thread_number = 0;
@@ -64,6 +79,9 @@ int main(const int argc, char *argv[]) {
     if (argc != 2) {
         return 1;
     }
+
+    int new_counts_bytes;
+    int new_scores_bytes;
 
     double exec_time;
 
@@ -82,10 +100,31 @@ int main(const int argc, char *argv[]) {
     cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
     if (!cabinets.scores) goto cleanup;
 
-    new_counts = (size_t *) calloc(problem.cabinet_count * n_threads, sizeof(size_t));
+    padded_count_per_thread =
+        get_allocation_size(problem.cabinet_count, SIZE_T_PER_CACHE_LINE);
+    new_counts_bytes = n_threads * padded_count_per_thread * sizeof(size_t);
+
+    if (posix_memalign((void **)&new_counts,
+                       CACHE_LINE_SIZE_IN_BYTES,
+                       new_counts_bytes) != 0) {
+        new_counts = NULL;
+                       }
     if (!new_counts) goto cleanup;
-    new_scores = (double *) calloc(problem.cabinet_count * problem.subject_count * n_threads, sizeof(double));
+    memset(new_counts, 0, new_counts_bytes);
+
+    padded_cabinet_subject_scores_per_thread =
+        get_allocation_size(problem.cabinet_count * problem.subject_count,
+                            DOUBLE_PER_CACHE_LINE);
+    new_scores_bytes =
+        n_threads * padded_cabinet_subject_scores_per_thread * sizeof(double);
+
+    if (posix_memalign((void **)&new_scores,
+                       CACHE_LINE_SIZE_IN_BYTES,
+                       new_scores_bytes) != 0) {
+        new_scores = NULL;
+                       }
     if (!new_scores) goto cleanup;
+    memset(new_scores, 0, new_scores_bytes);
 
     exec_time = -omp_get_wtime();
 
@@ -122,9 +161,9 @@ void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, co
         const size_t index = i % cabinets->count;
         documents->inner[i].parent_id = index;
 
-        new_counts[thread_number * cabinets->count + index] += 1;
+        new_counts[thread_number * padded_count_per_thread + index] += 1;
         for (size_t j = 0; j < subject_count; j++) {
-            new_scores[(thread_number * cabinets->count + index) * subject_count + j] += documents->scores[i * subject_count + j];
+            new_scores[thread_number * padded_cabinet_subject_scores_per_thread + index * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 }
@@ -135,7 +174,7 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
     for (size_t c = 0; c < cabinets->count; c++) {
         size_t count = 0;
         for (size_t t = 0; t < n_threads; t++) {
-            count += new_counts[t * cabinets->count + c];
+            count += new_counts[t * padded_count_per_thread + c];
         }
 
         double* score = &cabinets->scores[c * subject_count];
@@ -147,7 +186,7 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
         for (size_t s = 0; s < subject_count; s++) {
             double sum = 0.0;
             for (size_t t = 0; t < n_threads; t++) {
-                sum += new_scores[(t * cabinets->count + c) * subject_count + s];
+                sum += new_scores[t * padded_cabinet_subject_scores_per_thread + c * subject_count + s];
             }
              score[s] = sum / (double)count;
         }
@@ -158,8 +197,8 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
 #pragma omp single
     swaps = 0;
 
-    memset(&new_scores[thread_number * cabinets->count * subject_count], 0, cabinets->count * subject_count * sizeof(double));
-    memset(&new_counts[thread_number * cabinets->count], 0, cabinets->count * sizeof(size_t));
+    memset(&new_scores[thread_number * padded_cabinet_subject_scores_per_thread], 0, padded_cabinet_subject_scores_per_thread * sizeof(double));
+    memset(&new_counts[thread_number * padded_count_per_thread], 0, padded_count_per_thread * sizeof(size_t));
 
     // We have to wait for all swaps to be summed up, since a single thread's documents might not be moved (hence swaps = 0)
     // but another thread's assigned documents might, and we would be quitting the while cycle if we used "nowait"
@@ -173,10 +212,10 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
         }
 
         documents->inner[i].parent_id = new_cabinet_index;
-        new_counts[thread_number * cabinets->count + new_cabinet_index] += 1;
+        new_counts[thread_number * padded_count_per_thread + new_cabinet_index] += 1;
 
         for (size_t j = 0; j < subject_count; j++) {
-            new_scores[(thread_number * cabinets->count + new_cabinet_index) * subject_count + j] += documents->scores[i * subject_count + j];
+            new_scores[thread_number * padded_cabinet_subject_scores_per_thread + new_cabinet_index * subject_count + j] += documents->scores[i * subject_count + j];
         }
     }
 }

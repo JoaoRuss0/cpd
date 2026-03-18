@@ -70,6 +70,7 @@ double *new_scores = NULL;
 
 size_t padded_count_per_thread;
 size_t padded_cabinet_subject_scores_per_thread;
+size_t padded_subject_scores;
 
 int n_threads = 0;
 int thread_number = 0;
@@ -81,7 +82,8 @@ int main(const int argc, char *argv[]) {
     }
 
     size_t new_counts_bytes;
-    size_t new_scores_bytes;
+    size_t new_cabinet_scores_bytes;
+    size_t new_score_bytes;
 
     double exec_time;
 
@@ -97,8 +99,18 @@ int main(const int argc, char *argv[]) {
 
     Cabinets cabinets;
     cabinets.count = problem.cabinet_count;
-    cabinets.scores = (double *) calloc(problem.cabinet_count * problem.subject_count, sizeof(double));
+
+    padded_subject_scores =
+        get_allocation_size(problem.subject_count, DOUBLE_PER_CACHE_LINE);
+    new_score_bytes = cabinets.count * padded_subject_scores * sizeof(double);
+
+    if (posix_memalign((void **)&cabinets.scores,
+                       CACHE_LINE_SIZE_IN_BYTES,
+                       new_score_bytes) != 0) {
+        cabinets.scores = NULL;
+                       }
     if (!cabinets.scores) goto cleanup;
+    memset(cabinets.scores, 0, new_score_bytes);
 
     padded_count_per_thread =
         get_allocation_size(problem.cabinet_count, SIZE_T_PER_CACHE_LINE);
@@ -115,16 +127,16 @@ int main(const int argc, char *argv[]) {
     padded_cabinet_subject_scores_per_thread =
         get_allocation_size(problem.cabinet_count * problem.subject_count,
                             DOUBLE_PER_CACHE_LINE);
-    new_scores_bytes =
+    new_cabinet_scores_bytes =
         n_threads * padded_cabinet_subject_scores_per_thread * sizeof(double);
 
     if (posix_memalign((void **)&new_scores,
                        CACHE_LINE_SIZE_IN_BYTES,
-                       new_scores_bytes) != 0) {
+                       new_cabinet_scores_bytes) != 0) {
         new_scores = NULL;
                        }
     if (!new_scores) goto cleanup;
-    memset(new_scores, 0, new_scores_bytes);
+    memset(new_scores, 0, new_cabinet_scores_bytes);
 
     exec_time = -omp_get_wtime();
 
@@ -177,7 +189,7 @@ void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
             count += new_counts[t * padded_count_per_thread + c];
         }
 
-        double* score = &cabinets->scores[c * subject_count];
+        double* score = &cabinets->scores[c * padded_subject_scores];
         if (count == 0) {
             memset(score, 0, subject_count * sizeof(double));
             continue;
@@ -226,7 +238,7 @@ size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  
     size_t new_cabinet_index = document->parent_id;
 
     for (size_t j = 0; j < cabinets->count; j++) {
-        const double distance = calculate_distance(subject_count,&cabinets->scores[j * subject_count],document_scores);
+        const double distance = calculate_distance(subject_count,&cabinets->scores[j * padded_subject_scores],document_scores);
 
         if (distance < min_distance) {
             min_distance = distance;

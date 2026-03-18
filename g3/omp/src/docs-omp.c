@@ -160,7 +160,7 @@ cleanup:
 void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, const size_t subject_count) {
 
 // We can not use "nowait" since we need to know all the documents that belong to a cabinet before calculating its scores
-#pragma omp for
+#pragma omp for schedule(static)
     for (size_t i = 0; i < documents->count; i++) {
         const size_t index = i % cabinets->count;
         documents->parent_ids[i] = index;
@@ -174,7 +174,7 @@ void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, co
 
 void recalculate_scores(const Cabinets* cabinets, const size_t subject_count) {
 // We can not use "nowait" since we need to know the cabinet scores before calculating if a document is to be moved
-#pragma omp for
+#pragma omp for schedule(static)
     for (size_t c = 0; c < cabinets->count; c++) {
         size_t count = 0;
         for (size_t t = 0; t < n_threads; t++) {
@@ -206,7 +206,7 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
 
     // We have to wait for all swaps to be summed up, since a single thread's documents might not be moved (hence swaps = 0)
     // but another thread's assigned documents might, and we would be quitting the while cycle if we used "nowait"
-#pragma omp for reduction(+:swaps)
+#pragma omp for schedule(static) reduction(+:swaps)
     for (size_t i = 0; i < documents->count; i++) {
         const size_t old_cabinet_index = documents->parent_ids[i];
         const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, documents->parent_ids[i], &documents->scores[i * subject_count], subject_count);

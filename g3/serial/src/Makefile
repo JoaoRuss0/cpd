@@ -1,4 +1,3 @@
-CC=gcc-15
 TARGET=docs
 CCFLAGS=-O2 -fopenmp
 

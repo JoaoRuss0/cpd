@@ -7,19 +7,13 @@
 #include <stdbool.h>
 #include <omp.h>
 
-typedef struct Document Document;
 typedef struct Cabinets Cabinets;
 typedef struct Documents Documents;
 typedef struct Problem Problem;
 
-struct Document {
-    size_t id;
-    size_t parent_id;
-};
-
 struct Documents {
     size_t count;
-    Document *inner;
+    size_t *parent_ids;
     double *scores;
 };
 
@@ -32,11 +26,10 @@ struct Problem {
     size_t cabinet_count;
     size_t document_count;
     size_t subject_count;
-    Document *documents;
     double *document_scores;
 };
 
-size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count);
+size_t get_closest_cabinet_index(const Cabinets* cabinets, size_t parent_id,  double* document_scores, size_t subject_count);
 
 void recalculate_scores(const Cabinets* cabinets, size_t subject_count);
 
@@ -68,8 +61,9 @@ int main(const int argc, char *argv[]) {
 
     Documents documents;
     documents.count = problem.document_count;
-    documents.inner = problem.documents;
     documents.scores = problem.document_scores;
+    documents.parent_ids = calloc(documents.count, sizeof(size_t));
+    if (!documents.parent_ids) goto cleanup;
 
     Cabinets cabinets;
     cabinets.count = problem.cabinet_count;
@@ -99,6 +93,7 @@ cleanup:
     if (cabinets.scores) free(cabinets.scores);
     if (new_counts) free(new_counts);
     if (new_scores) free(new_scores);
+    if (documents.parent_ids) free(documents.parent_ids);
 
     return 0;
 }
@@ -138,14 +133,14 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
     memset(new_counts, 0, cabinets->count * sizeof(size_t));
 
     for (size_t i = 0; i < documents->count; i++) {
-        const size_t old_cabinet_index = documents->inner[i].parent_id;
-        const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, &documents->inner[i], &documents->scores[i * subject_count], subject_count);
+        const size_t old_cabinet_index = documents->parent_ids[i];
+        const size_t new_cabinet_index = get_closest_cabinet_index(cabinets, documents->parent_ids[i], &documents->scores[i * subject_count], subject_count);
 
         if (new_cabinet_index != old_cabinet_index) {
             swaps += 1;
         }
 
-        documents->inner[i].parent_id = new_cabinet_index;
+        documents->parent_ids[i] = new_cabinet_index;
         new_counts[new_cabinet_index] += 1;
 
         for (size_t j = 0; j < subject_count; j++) {
@@ -154,21 +149,20 @@ void reassign_documents(const Cabinets *cabinets, const Documents *documents, co
     }
 }
 
-size_t get_closest_cabinet_index(const Cabinets* cabinets, Document* document,  double* document_scores, size_t subject_count) {
+size_t get_closest_cabinet_index(const Cabinets* cabinets, size_t parent_id,  double* document_scores, size_t subject_count) {
 
     double min_distance = INFINITY;
-    size_t new_cabinet_index = document->parent_id;
 
     for (size_t j = 0; j < cabinets->count; j++) {
         const double distance = calculate_distance(subject_count,&cabinets->scores[j * subject_count],document_scores);
 
         if (distance < min_distance) {
             min_distance = distance;
-            new_cabinet_index = j;
+            parent_id = j;
         }
     }
 
-    return new_cabinet_index;
+    return parent_id;
 }
 
 double calculate_distance(const size_t subject_count, const double *score_1, const double *score_2) {
@@ -184,7 +178,7 @@ double calculate_distance(const size_t subject_count, const double *score_1, con
 
 void print_result(const Documents *documents) {
     for (size_t i = 0; i < documents->count; i++) {
-        printf("%zu\n", documents->inner[i].parent_id);
+        printf("%zu\n", documents->parent_ids[i]);
     }
 }
 
@@ -203,8 +197,6 @@ bool parse_problem(const char *filename, Problem *p) {
         goto cleanup;
     }
 
-    p->documents = (Document *) calloc(p->document_count, sizeof(Document));
-    if (!p->documents) goto cleanup;
     p->document_scores = (double *) calloc(p->document_count * p->subject_count, sizeof(double));
     if (!p->document_scores) goto cleanup;
 
@@ -219,8 +211,6 @@ bool parse_problem(const char *filename, Problem *p) {
             status = false;
             goto cleanup;
         }
-
-        p->documents[i].id = i;
 
         for (size_t j = 0; j < p->subject_count; j++) {
             token = strtok(NULL, " ");
@@ -241,5 +231,4 @@ cleanup:
 
 void free_problem(const Problem *p) {
     if (p->document_scores) free(p->document_scores);
-    if (p->documents) free(p->documents);
 }

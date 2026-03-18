@@ -80,8 +80,8 @@ int main(const int argc, char *argv[]) {
         return 1;
     }
 
-    int new_counts_bytes;
-    int new_scores_bytes;
+    size_t new_counts_bytes;
+    size_t new_scores_bytes;
 
     double exec_time;
 

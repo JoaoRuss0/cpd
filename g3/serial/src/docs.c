@@ -102,7 +102,7 @@ void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents, co
 
     for (size_t i = 0; i < documents->count; i++) {
         const size_t index = i % cabinets->count;
-        documents->inner[i].parent_id = index;
+        documents->parent_ids[i] = index;
 
         new_counts[index] += 1;
         for (size_t j = 0; j < subject_count; j++) {

@@ -1,13 +1,11 @@
+CC=gcc-15
 TARGET=docs-omp
 CCFLAGS=-O2 -fopenmp
 
-all: clean $(TARGET)
+all: $(TARGET)
 
 warn: CCFLAGS += -Wall -Wextra
-warn: clean $(TARGET)
+warn: $(TARGET)
 
 $(TARGET):
 	$(CC) $(CCFLAGS) -o $(TARGET) $(TARGET).c
-
-clean:
-	rm -f $(TARGET)

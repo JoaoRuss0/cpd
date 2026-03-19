@@ -1,6 +1,5 @@
 .idea
 *.dSYM
-*-new.out
 *docs
 *docs-omp
 *docs-mpi

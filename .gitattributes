@@ -1,2 +1,17 @@
+* linguist-documentation
+
+*.c -linguist-documentation
+*.c linguist-detectable=true
 *.c linguist-language=C
+
+*.h -linguist-documentation
+*.h linguist-detectable=true
 *.h linguist-language=C
+
+*.sh -linguist-documentation
+*.sh linguist-detectable=true
+*.sh linguist-language=Shell
+
+Makefile -linguist-documentation
+Makefile linguist-detectable=true
+Makefile linguist-language=Makefile

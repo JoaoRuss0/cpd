@@ -18,9 +18,9 @@ struct Documents {
 
 struct Cabinets {
     size_t count;
-    size_t *document_count;
-    double *sub_score_sum;
-    double *sub_scores;
+    size_t *doc_count;
+    double *temp_scores;
+    double *scores;
 };
 
 struct Problem {
@@ -37,7 +37,6 @@ bool reassign_documents();
 void increment_cabinet_scores(size_t cab_idx, size_t doc_idx);
 void decrement_cabinet_scores(size_t cab_idx, size_t doc_idx);
 void update_cabinets(size_t cab_idx, size_t doc_idx, int to_add);
-void recalculate_centroids();
 void free_problem(Problem *p);
 bool parse_problem(char *filename, Problem *p);
 bool init_cabinets(Problem *problem);
@@ -77,9 +76,9 @@ int main(int argc, char *argv[]) {
 
 cleanup:
     free_problem(&problem);
-    if (cabinets.document_count) free(cabinets.document_count);
-    if (cabinets.sub_score_sum) free(cabinets.sub_score_sum);
-    if (cabinets.sub_scores) free(cabinets.sub_scores);
+    if (cabinets.doc_count) free(cabinets.doc_count);
+    if (cabinets.temp_scores) free(cabinets.temp_scores);
+    if (cabinets.scores) free(cabinets.scores);
     if (documents.parent_ids) free(documents.parent_ids);
 
     return 0;
@@ -87,12 +86,9 @@ cleanup:
 
 void assign_to_cabinets() {
     for (size_t i = 0; i < documents.count; i++) {
-        size_t cab_idx = i % cabinets.count;
-
-        documents.parent_ids[i] = cab_idx;
-        increment_cabinet_scores(cab_idx, i);
+        increment_cabinet_scores(i % cabinets.count, i);
     }
-    recalculate_centroids();
+    memcpy(cabinets.scores, cabinets.temp_scores, cabinets.count * subject_count * sizeof(double));
 }
 
 bool reassign_documents() {
@@ -104,11 +100,10 @@ bool reassign_documents() {
 
         if (new_cab_idx == old_cab_idx) continue;
         swaps |= true;
-        documents.parent_ids[i] = new_cab_idx;
         increment_cabinet_scores(new_cab_idx, i);
         decrement_cabinet_scores(old_cab_idx, i);
     }
-    recalculate_centroids();
+    memcpy(cabinets.scores, cabinets.temp_scores, cabinets.count * subject_count * sizeof(double));
 
     return swaps;
 }
@@ -122,25 +117,22 @@ void decrement_cabinet_scores(size_t cab_idx, size_t doc_idx) {
 }
 
 void update_cabinets(size_t cab_idx, size_t doc_idx, int to_add) {
-    cabinets.document_count[cab_idx] += to_add;
-    for (size_t j = 0; j < subject_count; j++) {
-        cabinets.sub_score_sum[cab_idx * subject_count + j] +=
-            to_add * documents.scores[doc_idx * subject_count + j];
-    }
-}
+    size_t doc_count = cabinets.doc_count[cab_idx];
+    size_t new_doc_count = (to_add > 0) ? doc_count + 1 : doc_count - 1;
 
-void recalculate_centroids() {
-    for (size_t i = 0; i < cabinets.count; i++) {
-        for (size_t j = 0; j < subject_count; j++) {
-            if (cabinets.document_count[i] == 0) {
-                cabinets.sub_scores[i * subject_count + j] = 0.0;
-                continue;
-            }
-            cabinets.sub_scores[i * subject_count + j] =
-                cabinets.sub_score_sum[i * subject_count + j] /
-                cabinets.document_count[i];
+    for (size_t j = 0; j < subject_count; j++) {
+        size_t idx = cab_idx * subject_count + j;
+
+        if (new_doc_count == 0) {
+            cabinets.temp_scores[idx] = 0;
+            continue;
         }
+
+        cabinets.temp_scores[idx] =
+            (cabinets.temp_scores[idx] * (double) doc_count + (double) to_add * documents.scores[doc_idx * subject_count + j])
+                / (double) new_doc_count;
     }
+    cabinets.doc_count[cab_idx] = new_doc_count;
 }
 
 size_t get_closest_cabinet_index(size_t parent_id, double *document_scores) {
@@ -148,7 +140,7 @@ size_t get_closest_cabinet_index(size_t parent_id, double *document_scores) {
 
     for (size_t j = 0; j < cabinets.count; j++) {
         double distance = calculate_distance(
-            &cabinets.sub_scores[j * subject_count], document_scores);
+            &cabinets.scores[j * subject_count], document_scores);
 
         if (distance < min_distance) {
             min_distance = distance;
@@ -172,13 +164,13 @@ double calculate_distance(double *score_1, double *score_2) {
 
 bool init_cabinets(Problem *problem) {
     cabinets.count = problem->cabinet_count;
-    cabinets.sub_scores = (double *)calloc(
-        problem->cabinet_count * problem->subject_count, sizeof(double));
-    cabinets.document_count = (size_t *)calloc(cabinets.count, sizeof(size_t));
-    cabinets.sub_score_sum =
-        (double *)calloc(cabinets.count * problem->subject_count, sizeof(double));
+    cabinets.scores =
+        (double *)calloc(problem->cabinet_count * problem->subject_count, sizeof(double));
+    cabinets.temp_scores =
+        (double *)calloc(problem->cabinet_count * problem->subject_count, sizeof(double));
+    cabinets.doc_count = (size_t *)calloc(cabinets.count, sizeof(size_t));
 
-    return cabinets.sub_scores && cabinets.document_count;
+    return cabinets.scores && cabinets.doc_count && cabinets.temp_scores;
 }
 
 bool init_documents(Problem *problem) {

@@ -18,7 +18,9 @@ struct Documents {
 
 struct Cabinets {
     size_t count;
-    double *scores;
+    size_t *document_count;
+    double *sub_score_sum;
+    double *sub_scores;
 };
 
 struct Problem {
@@ -28,147 +30,125 @@ struct Problem {
     double *document_scores;
 };
 
-size_t get_closest_cabinet_index(const Cabinets *cabinets, size_t parent_id,
-                                 double *document_scores, size_t subject_count);
+size_t get_closest_cabinet_index(size_t parent_id, double *document_scores);
+void assign_to_cabinets();
+double calculate_distance(double *score_1, double *score_2);
+bool reassign_documents();
+void increment_cabinet_scores(size_t cab_idx, size_t doc_idx);
+void decrement_cabinet_scores(size_t cab_idx, size_t doc_idx);
+void update_cabinets(size_t cab_idx, size_t doc_idx, int to_add);
+void recalculate_centroids();
+void free_problem(Problem *p);
+bool parse_problem(char *filename, Problem *p);
+bool init_cabinets(Problem *problem);
+bool init_documents(Problem *problem);
+void print_result();
 
-void recalculate_scores(const Cabinets *cabinets, size_t subject_count);
+Documents documents;
+Cabinets cabinets;
+size_t subject_count;
 
-void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents,
-                        size_t subject_count);
-
-double calculate_distance(size_t subject_count, const double *score_1,
-                          const double *score_2);
-
-void reassign_documents(const Cabinets *cabinets, const Documents *documents,
-                        size_t subject_count);
-
-void free_problem(const Problem *p);
-
-bool parse_problem(const char *filename, Problem *p);
-
-void print_result(const Documents *documents);
-
-int swaps = 0;
-size_t *new_counts = NULL;
-double *new_scores = NULL;
-
-int main(const int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     if (argc != 2) {
         return 1;
     }
 
     double exec_time;
+    bool swaps = false;
 
     Problem problem;
-    if (!parse_problem(argv[1], &problem)) goto cleanup;
+    if (!parse_problem(argv[1], &problem) || !init_documents(&problem) ||
+        !init_cabinets(&problem))
+        goto cleanup;
 
-    Documents documents;
-    documents.count = problem.document_count;
-    documents.scores = problem.document_scores;
-    documents.parent_ids = calloc(documents.count, sizeof(size_t));
-    if (!documents.parent_ids) goto cleanup;
-
-    Cabinets cabinets;
-    cabinets.count = problem.cabinet_count;
-    cabinets.scores = (double *)calloc(
-        problem.cabinet_count * problem.subject_count, sizeof(double));
-    if (!cabinets.scores) goto cleanup;
-
-    new_counts = (size_t *)calloc(problem.cabinet_count, sizeof(size_t));
-    if (!new_counts) goto cleanup;
-    new_scores = (double *)calloc(problem.cabinet_count * problem.subject_count,
-                                  sizeof(double));
-    if (!new_scores) goto cleanup;
+    subject_count = problem.subject_count;
 
     exec_time = -omp_get_wtime();
 
-    assign_to_cabinets(&cabinets, &documents, problem.subject_count);
+    assign_to_cabinets();
     do {
-        recalculate_scores(&cabinets, problem.subject_count);
-        reassign_documents(&cabinets, &documents, problem.subject_count);
-    } while (swaps > 0);
+        swaps = reassign_documents();
+    } while (swaps);
 
     exec_time += omp_get_wtime();
 
     fprintf(stderr, "%.1fs\n", exec_time);
-    print_result(&documents);
+    print_result();
 
 cleanup:
     free_problem(&problem);
-    if (cabinets.scores) free(cabinets.scores);
-    if (new_counts) free(new_counts);
-    if (new_scores) free(new_scores);
+    if (cabinets.document_count) free(cabinets.document_count);
+    if (cabinets.sub_score_sum) free(cabinets.sub_score_sum);
+    if (cabinets.sub_scores) free(cabinets.sub_scores);
     if (documents.parent_ids) free(documents.parent_ids);
 
     return 0;
 }
 
-void assign_to_cabinets(const Cabinets *cabinets, const Documents *documents,
-                        const size_t subject_count) {
-    for (size_t i = 0; i < documents->count; i++) {
-        const size_t index = i % cabinets->count;
-        documents->parent_ids[i] = index;
+void assign_to_cabinets() {
+    for (size_t i = 0; i < documents.count; i++) {
+        size_t cab_idx = i % cabinets.count;
 
-        new_counts[index] += 1;
+        documents.parent_ids[i] = cab_idx;
+        increment_cabinet_scores(cab_idx, i);
+    }
+    recalculate_centroids();
+}
+
+bool reassign_documents() {
+    bool swaps = false;
+    for (size_t i = 0; i < documents.count; i++) {
+        size_t old_cab_idx = documents.parent_ids[i];
+        size_t new_cab_idx = get_closest_cabinet_index(
+            documents.parent_ids[i], &documents.scores[i * subject_count]);
+
+        if (new_cab_idx == old_cab_idx) continue;
+        swaps |= true;
+        documents.parent_ids[i] = new_cab_idx;
+        increment_cabinet_scores(new_cab_idx, i);
+        decrement_cabinet_scores(old_cab_idx, i);
+    }
+    recalculate_centroids();
+
+    return swaps;
+}
+
+void increment_cabinet_scores(size_t cab_idx, size_t doc_idx) {
+    update_cabinets(cab_idx, doc_idx, 1);
+}
+
+void decrement_cabinet_scores(size_t cab_idx, size_t doc_idx) {
+    update_cabinets(cab_idx, doc_idx, -1);
+}
+
+void update_cabinets(size_t cab_idx, size_t doc_idx, int to_add) {
+    cabinets.document_count[cab_idx] += to_add;
+    for (size_t j = 0; j < subject_count; j++) {
+        cabinets.sub_score_sum[cab_idx * subject_count + j] +=
+            to_add * documents.scores[doc_idx * subject_count + j];
+    }
+}
+
+void recalculate_centroids() {
+    for (size_t i = 0; i < cabinets.count; i++) {
         for (size_t j = 0; j < subject_count; j++) {
-            new_scores[index * subject_count + j] +=
-                documents->scores[i * subject_count + j];
+            if (cabinets.document_count[i] == 0) {
+                cabinets.sub_scores[i * subject_count + j] = 0.0;
+                continue;
+            }
+            cabinets.sub_scores[i * subject_count + j] =
+                cabinets.sub_score_sum[i * subject_count + j] /
+                cabinets.document_count[i];
         }
     }
 }
 
-void recalculate_scores(const Cabinets *cabinets, const size_t subject_count) {
-    memset(cabinets->scores, 0,
-           cabinets->count * subject_count * sizeof(double));
-    for (size_t c = 0; c < cabinets->count; c++) {
-        double *score = &cabinets->scores[c * subject_count];
-        if (new_counts[c] == 0) {
-            memset(score, 0, subject_count * sizeof(double));
-            continue;
-        }
-
-        for (size_t s = 0; s < subject_count; s++) {
-            score[s] =
-                new_scores[c * subject_count + s] / (double)new_counts[c];
-        }
-    }
-}
-
-void reassign_documents(const Cabinets *cabinets, const Documents *documents,
-                        const size_t subject_count) {
-    swaps = 0;
-    memset(new_scores, 0, cabinets->count * subject_count * sizeof(double));
-    memset(new_counts, 0, cabinets->count * sizeof(size_t));
-
-    for (size_t i = 0; i < documents->count; i++) {
-        const size_t old_cabinet_index = documents->parent_ids[i];
-        const size_t new_cabinet_index = get_closest_cabinet_index(
-            cabinets, documents->parent_ids[i],
-            &documents->scores[i * subject_count], subject_count);
-
-        if (new_cabinet_index != old_cabinet_index) {
-            swaps += 1;
-        }
-
-        documents->parent_ids[i] = new_cabinet_index;
-        new_counts[new_cabinet_index] += 1;
-
-        for (size_t j = 0; j < subject_count; j++) {
-            new_scores[new_cabinet_index * subject_count + j] +=
-                documents->scores[i * subject_count + j];
-        }
-    }
-}
-
-size_t get_closest_cabinet_index(const Cabinets *cabinets, size_t parent_id,
-                                 double *document_scores,
-                                 size_t subject_count) {
+size_t get_closest_cabinet_index(size_t parent_id, double *document_scores) {
     double min_distance = INFINITY;
 
-    for (size_t j = 0; j < cabinets->count; j++) {
-        const double distance = calculate_distance(
-            subject_count, &cabinets->scores[j * subject_count],
-            document_scores);
+    for (size_t j = 0; j < cabinets.count; j++) {
+        double distance = calculate_distance(
+            &cabinets.sub_scores[j * subject_count], document_scores);
 
         if (distance < min_distance) {
             min_distance = distance;
@@ -179,25 +159,43 @@ size_t get_closest_cabinet_index(const Cabinets *cabinets, size_t parent_id,
     return parent_id;
 }
 
-double calculate_distance(const size_t subject_count, const double *score_1,
-                          const double *score_2) {
+double calculate_distance(double *score_1, double *score_2) {
     double sum = 0;
 
     for (size_t i = 0; i < subject_count; i++) {
-        const double diff = score_1[i] - score_2[i];
+        double diff = score_1[i] - score_2[i];
         sum += diff * diff;
     }
 
     return sum;
 }
 
-void print_result(const Documents *documents) {
-    for (size_t i = 0; i < documents->count; i++) {
-        printf("%zu\n", documents->parent_ids[i]);
+bool init_cabinets(Problem *problem) {
+    cabinets.count = problem->cabinet_count;
+    cabinets.sub_scores = (double *)calloc(
+        problem->cabinet_count * problem->subject_count, sizeof(double));
+    cabinets.document_count = (size_t *)calloc(cabinets.count, sizeof(size_t));
+    cabinets.sub_score_sum =
+        (double *)calloc(cabinets.count * problem->subject_count, sizeof(double));
+
+    return cabinets.sub_scores && cabinets.document_count;
+}
+
+bool init_documents(Problem *problem) {
+    documents.count = problem->document_count;
+    documents.scores = problem->document_scores;
+    documents.parent_ids = calloc(documents.count, sizeof(size_t));
+
+    return documents.parent_ids;
+}
+
+void print_result() {
+    for (size_t i = 0; i < documents.count; i++) {
+        printf("%zu\n", documents.parent_ids[i]);
     }
 }
 
-bool parse_problem(const char *filename, Problem *p) {
+bool parse_problem(char *filename, Problem *p) {
     bool status = true;
     FILE *file = fopen(filename, "r");
     if (!file) {
@@ -246,6 +244,6 @@ cleanup:
     return status;
 }
 
-void free_problem(const Problem *p) {
+void free_problem(Problem *p) {
     if (p->document_scores) free(p->document_scores);
 }

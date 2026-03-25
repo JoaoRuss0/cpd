@@ -23,7 +23,7 @@ struct Documents {
 
 struct Cabinets {
     size_t count;
-    double *scores;
+    double *sub_scores;
 };
 
 struct Problem {
@@ -111,7 +111,7 @@ int main(const int argc, char *argv[]) {
 
 cleanup:
     free_problem(&problem);
-    if (cabinets.scores) free(cabinets.scores);
+    if (cabinets.sub_scores) free(cabinets.sub_scores);
     if (new_counts) free(new_counts);
     if (new_scores) free(new_scores);
     if (documents.parent_ids) free(documents.parent_ids);
@@ -144,7 +144,7 @@ void recalculate_scores(const Cabinets *cabinets, const size_t subject_count) {
             count += new_counts[t * padded_count_per_thread + c];
         }
 
-        double *score = &cabinets->scores[c * padded_subject_scores];
+        double *score = &cabinets->sub_scores[c * padded_subject_scores];
         if (count == 0) {
             memset(score, 0, subject_count * sizeof(double));
             continue;
@@ -203,7 +203,7 @@ size_t get_closest_cabinet_index(const Cabinets *cabinets, size_t parent_id,
 
     for (size_t j = 0; j < cabinets->count; j++) {
         const double distance = calculate_distance(
-            subject_count, &cabinets->scores[j * padded_subject_scores],
+            subject_count, &cabinets->sub_scores[j * padded_subject_scores],
             document_scores);
 
         if (distance < min_distance) {
@@ -314,9 +314,9 @@ int init_cabinets(Problem *problem, Cabinets *cabinets) {
 
     padded_subject_scores =
         get_allocation_size(problem->subject_count, DOUBLE_PER_CACHE_LINE);
-    cabinets->scores = (double *)get_cache_aligned_pointer(
+    cabinets->sub_scores = (double *)get_cache_aligned_pointer(
         cabinets->count * padded_subject_scores * sizeof(double));
-    if (!cabinets->scores) return 1;
+    if (!cabinets->sub_scores) return 1;
     return 0;
 }
 

@@ -1,0 +1,16 @@
+[
+  {
+    "file": "docs-mpi.c",
+    "arguments": [
+      "gcc-15",
+      "-O2",
+      "-fopenmp",
+      "-o",
+      "docs-mpi",
+      "docs-mpi.c",
+      "-I/opt/homebrew/Cellar/open-mpi/5.0.9/include"
+    ],
+    "directory": "/Users/joaorusso/Documents/MEIC/CPD/project/g3/mpi/src",
+    "output": "docs-mpi"
+  }
+]

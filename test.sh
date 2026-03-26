@@ -1,10 +1,27 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Running tests..."
+MAKE_DIR="./g3/omp/src"                   # directory where the Makefile is
+MAKE_TARGET=""                            # e.g. "project" or leave empty for default target
+DEFAULT_BINARY="./g3/omp/src/docs-omp"    # binary produced by make
 
-binary=$1
-shift
+
+if [ $# -eq 0 ]; then
+    echo "No binary provided. Building with make..."
+
+    if [ -n "$MAKE_TARGET" ]; then
+        make -C "$MAKE_DIR" "$MAKE_TARGET"
+    else
+        make -C "$MAKE_DIR"
+    fi
+
+    binary="$DEFAULT_BINARY"
+else
+    binary=$1
+    shift
+fi
+
+echo "Running tests..."
 
 if [ "$#" -eq 0 ]; then
     for dir in tests/T*/; do

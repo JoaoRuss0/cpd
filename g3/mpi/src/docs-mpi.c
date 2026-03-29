@@ -52,6 +52,7 @@ void print_result();
 void compute_comms();
 void gather_parent_ids();
 bool init_changes();
+bool init_sums_counts();
 void compute_partition(size_t total, int num_parts, int part_id, size_t *start, size_t *end, size_t *count);
 int assign_best_cabinet();
 void recompute_scores();
@@ -67,7 +68,8 @@ int row;
 int col;
 int grid_rows;
 int grid_cols;
-MPI_Comm row_comm, col_comm;
+MPI_Comm row_comm;
+MPI_Comm col_comm;
 
 size_t doc_s;
 size_t doc_e;
@@ -105,21 +107,14 @@ int main(int argc, char *argv[]) {
     if (!parse_problem(argv[1], &problem) || !init_documents(&problem) ||
         !init_cabinets(&problem))
         goto cleanup;
-
     subject_count = problem.subject_count;
+
     compute_comms();
-
-    local_count = calloc(cabinets.count, sizeof(size_t));
-    local_sum = calloc(cabinets.count * subject_count, sizeof(double));
-
-    global_count = calloc(cabinets.count, sizeof(size_t));
-    global_sum = calloc(cabinets.count * subject_count, sizeof(double));
-    global_swaps = 0;
-
     compute_partition(documents.count, grid_rows, row, &doc_s, &doc_e, &local_doc_count);
     compute_partition(cabinets.count, grid_cols, col, &cab_s, &cab_e, &local_cab_count);
 
-    if (!init_changes()) goto cleanup;
+    if (!init_changes() || !init_sums_counts()) goto cleanup;
+    global_swaps = 0;
 
     exec_time = -omp_get_wtime();
 
@@ -153,6 +148,14 @@ cleanup:
     if (documents.parent_ids) free(documents.parent_ids);
     if (global_changes) free(global_changes);
     if (local_changes) free(local_changes);
+    if (local_count) free(local_count);
+    if (local_sum) free(local_sum);
+    if (global_count) free(global_count);
+    if (global_sum) free(global_sum);
+    if (row_comm != MPI_COMM_NULL) MPI_Comm_free(&row_comm);
+    if (col_comm != MPI_COMM_NULL) MPI_Comm_free(&col_comm);
+
+    MPI_Finalize();
 
     MPI_Finalize();
     return 0;
@@ -334,6 +337,9 @@ void free_problem(Problem *p) {
 }
 
 void compute_comms() {
+    row_comm = MPI_COMM_NULL;
+    col_comm = MPI_COMM_NULL;
+
     int dims[2] = {0, 0};
     MPI_Dims_create(n_procs, 2, dims);
     grid_rows = dims[0];
@@ -400,4 +406,15 @@ int assign_best_cabinet() {
     }
 
     return swaps;
+}
+
+bool init_sums_counts() {
+
+    local_count = calloc(cabinets.count, sizeof(size_t));
+    local_sum = calloc(cabinets.count * subject_count, sizeof(double));
+
+    global_count = calloc(cabinets.count, sizeof(size_t));
+    global_sum = calloc(cabinets.count * subject_count, sizeof(double));
+
+    return  local_count && local_sum && global_count && global_sum;
 }

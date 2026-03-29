@@ -3,13 +3,10 @@ CC=mpicc
 TARGET=docs-mpi
 CFLAGS=-O2 -fopenmp
 
-all: clean $(TARGET)
+all: $(TARGET)
 
 warn: CFLAGS += -Wall -Wextra
 warn: $(TARGET)
 
 $(TARGET):
 	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).c
-
-clean:
-	rm $(TARGET)

@@ -156,8 +156,6 @@ cleanup:
     if (col_comm != MPI_COMM_NULL) MPI_Comm_free(&col_comm);
 
     MPI_Finalize();
-
-    MPI_Finalize();
     return 0;
 }
 

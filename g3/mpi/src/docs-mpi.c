@@ -1,3 +1,4 @@
+#include <_time.h>
 #include <math.h>
 #include <mpi.h>
 #include <omp.h>
@@ -6,6 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define SEED 1234
+#define RAND_RANGE 10.0
+#define UNIF01 ((double)rand() / RAND_MAX)
 
 typedef struct Cabinets Cabinets;
 typedef struct Documents Documents;
@@ -212,7 +217,7 @@ void assign_to_cabinets() {
     size_t *cabinet_document_counts = calloc(local_cab_count, sizeof(size_t));
     if (!cabinet_document_counts) return;
 
-#pragma omp parallel for reduction(+:cabinet_document_counts[:local_cab_count])
+#pragma omp parallel for
     for (size_t i = 0; i < documents.count; i++) {
         size_t cab_idx = i % cabinets.count;
 
@@ -221,6 +226,7 @@ void assign_to_cabinets() {
         if (cab_idx < cab_s || cab_idx >= cab_e) continue;
         size_t array_cab_idx = cab_idx - cab_s;
 
+#pragma omp atomic
         cabinet_document_counts[array_cab_idx]++;
 
         for (size_t j = 0; j < subject_count; j++) {
@@ -240,7 +246,8 @@ void assign_to_cabinets() {
                     (double)doc_count;
                 continue;
             }
-            cabinets.scores[(cab_s + cab_idx) * subject_count + sub_index] = 0.0;
+            cabinets.scores[(cab_s + cab_idx) * subject_count + sub_index] =
+                0.0;
         }
     }
 
@@ -328,27 +335,10 @@ bool parse_problem(char *filename, Problem *p) {
         (double *)calloc(p->document_count * p->subject_count, sizeof(double));
     if (!p->document_scores) goto cleanup;
 
-    for (size_t i = 0; i < p->document_count; i++) {
-        if (!fgets(line, 1024, file)) {
-            status = false;
-            goto cleanup;
-        }
-
-        char *token = strtok(line, " ");
-        if (token == NULL) {
-            status = false;
-            goto cleanup;
-        }
-
-        for (size_t j = 0; j < p->subject_count; j++) {
-            token = strtok(NULL, " ");
-            if (token == NULL) {
-                status = false;
-                goto cleanup;
-            }
-            p->document_scores[p->subject_count * i + j] = strtod(token, NULL);
-        }
-    }
+    srand(SEED);
+    for (size_t i = 0; i < p->document_count; i++)
+        for (size_t j = 0; j < p->subject_count; j++)
+            p->document_scores[p->subject_count * i + j] = UNIF01 * RAND_RANGE;
 
 cleanup:
     if (file) fclose(file);
@@ -433,8 +423,8 @@ int assign_best_cabinet() {
         if (new_cab_idx < cab_s || new_cab_idx >= cab_e) continue;
 
         size_t arr_cab_index = new_cab_idx - cab_s;
-
         local_count[arr_cab_index]++;
+
         for (int s = 0; s < subject_count; s++)
             local_sum[arr_cab_index * subject_count + s] +=
                 documents.scores[(doc_s + d) * subject_count + s];

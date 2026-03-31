@@ -1,12 +1,17 @@
 export OMPI_CC=gcc-15
 CC=mpicc
-TARGET=docs-mpi
+TARGETS=docs-mpi-checker docs-mpi-checker-omp docs-mpi-checker-full docs-mpi-row docs-mpi-row-omp
 CFLAGS=-O2 -fopenmp
 
-all: $(TARGET)
+.PHONY: all warn clean
+
+all: $(TARGETS)
 
 warn: CFLAGS += -Wall -Wextra
-warn: $(TARGET)
+warn: $(TARGETS)
 
-$(TARGET):
-	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).c
+%: %.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+clean:
+	rm -f $(TARGETS)

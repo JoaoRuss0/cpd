@@ -20,7 +20,6 @@ struct Documents {
 
 struct Cabinets {
     size_t count;
-    size_t *doc_count;
     double *scores;
     size_t *doc_ids;
 };
@@ -37,7 +36,9 @@ struct Change {
     double distance;
 };
 
-size_t get_closest_local_cabinet_index(size_t parent_id, double *document_scores, double* distance);
+size_t get_closest_local_cabinet_index(size_t parent_id,
+                                       double *document_scores,
+                                       double *distance);
 void assign_to_cabinets();
 double calculate_distance(double *score_1, double *score_2);
 void compute_best_local_cabinet_for_documents();
@@ -53,7 +54,8 @@ void compute_comms();
 void gather_parent_ids();
 bool init_changes();
 bool init_sums_counts();
-void compute_partition(size_t total, int num_parts, int part_id, size_t *start, size_t *end, size_t *count);
+void compute_partition(size_t total, int num_parts, int part_id, size_t *start,
+                       size_t *end, size_t *count);
 int assign_best_cabinet();
 void recompute_scores();
 
@@ -79,8 +81,8 @@ size_t cab_s;
 size_t cab_e;
 size_t local_cab_count;
 
-Change* local_changes;
-Change* global_changes;
+Change *local_changes;
+Change *global_changes;
 
 size_t *local_count;
 double *local_sum;
@@ -110,8 +112,10 @@ int main(int argc, char *argv[]) {
     subject_count = problem.subject_count;
 
     compute_comms();
-    compute_partition(documents.count, grid_rows, row, &doc_s, &doc_e, &local_doc_count);
-    compute_partition(cabinets.count, grid_cols, col, &cab_s, &cab_e, &local_cab_count);
+    compute_partition(documents.count, grid_rows, row, &doc_s, &doc_e,
+                      &local_doc_count);
+    compute_partition(cabinets.count, grid_cols, col, &cab_s, &cab_e,
+                      &local_cab_count);
 
     if (!init_changes() || !init_sums_counts()) goto cleanup;
     global_swaps = 0;
@@ -121,13 +125,15 @@ int main(int argc, char *argv[]) {
     assign_to_cabinets();
     do {
         compute_best_local_cabinet_for_documents();
-        MPI_Allgather(local_changes, (int)(local_doc_count * sizeof(Change)), MPI_BYTE,
-              global_changes, (int)(local_doc_count * sizeof(Change)), MPI_BYTE,
-              row_comm);
+        MPI_Allgather(local_changes, (int)(local_doc_count * sizeof(Change)),
+                      MPI_BYTE, global_changes,
+                      (int)(local_doc_count * sizeof(Change)), MPI_BYTE,
+                      row_comm);
         local_swaps = assign_best_cabinet();
 
         MPI_Request request;
-        MPI_Iallreduce(&local_swaps, &global_swaps, 1, MPI_INT, MPI_LOR, col_comm, &request);
+        MPI_Iallreduce(&local_swaps, &global_swaps, 1, MPI_INT, MPI_LOR,
+                       col_comm, &request);
         recompute_scores();
         MPI_Waitall(1, &request, MPI_STATUS_IGNORE);
 
@@ -143,7 +149,6 @@ int main(int argc, char *argv[]) {
 
 cleanup:
     free_problem(&problem);
-    if (cabinets.doc_count) free(cabinets.doc_count);
     if (cabinets.scores) free(cabinets.scores);
     if (documents.parent_ids) free(documents.parent_ids);
     if (global_changes) free(global_changes);
@@ -160,17 +165,21 @@ cleanup:
 }
 
 void recompute_scores() {
-
     MPI_Request requests[2];
-    MPI_Iallreduce(local_count, global_count, (int)cabinets.count,
+    MPI_Iallreduce(local_count, global_count, (int)local_cab_count,
                    MPI_UNSIGNED_LONG, MPI_SUM, col_comm, &requests[0]);
-    MPI_Iallreduce(local_sum, global_sum, (int)(cabinets.count * subject_count),
-                  MPI_DOUBLE, MPI_SUM, col_comm, &requests[1]);
+    MPI_Iallreduce(local_sum, global_sum,
+                   (int)(local_cab_count * subject_count), MPI_DOUBLE, MPI_SUM,
+                   col_comm, &requests[1]);
     MPI_Waitall(2, requests, MPI_STATUS_IGNORE);
 
-    for (size_t c = 0; c < cabinets.count; c++)
+#pragma omp parallel for
+    for (size_t c = 0; c < local_cab_count; c++)
         for (size_t s = 0; s < subject_count; s++)
-            cabinets.scores[c * subject_count + s] = global_count[c] ? global_sum[c * subject_count + s] / (double) global_count[c] : 0.0;
+            cabinets.scores[(cab_s + c) * subject_count + s] =
+                global_count[c] ? global_sum[c * subject_count + s] /
+                                      (double)global_count[c]
+                                : 0.0;
 }
 
 void gather_parent_ids() {
@@ -200,38 +209,58 @@ void gather_parent_ids() {
 }
 
 void assign_to_cabinets() {
+    size_t *cabinet_document_counts = calloc(local_cab_count, sizeof(size_t));
+    if (!cabinet_document_counts) return;
+
+#pragma omp parallel for reduction(+:cabinet_document_counts[:local_cab_count])
     for (size_t i = 0; i < documents.count; i++) {
         size_t cab_idx = i % cabinets.count;
 
-        size_t doc_count = cabinets.doc_count[cab_idx];
-        size_t new_doc_count = doc_count + 1;
+        documents.parent_ids[i] = cab_idx;
+
+        if (cab_idx < cab_s || cab_idx >= cab_e) continue;
+        size_t array_cab_idx = cab_idx - cab_s;
+
+        cabinet_document_counts[array_cab_idx]++;
 
         for (size_t j = 0; j < subject_count; j++) {
-            size_t idx = cab_idx * subject_count + j;
+#pragma omp atomic
+            cabinets.scores[cab_idx * subject_count + j] +=
+                documents.scores[i * subject_count + j];
+        }
+    }
 
-            if (new_doc_count == 0) {
-                cabinets.scores[idx] = 0;
+#pragma omp parallel for
+    for (size_t cab_idx = 0; cab_idx < local_cab_count; cab_idx++) {
+        size_t doc_count = cabinet_document_counts[cab_idx];
+        for (size_t sub_index = 0; sub_index < subject_count; sub_index++) {
+            if (doc_count != 0) {
+                cabinets
+                    .scores[(cab_s + cab_idx) * subject_count + sub_index] /=
+                    (double)doc_count;
                 continue;
             }
-
-            cabinets.scores[idx] = (cabinets.scores[idx] * (double)doc_count +
-                                    documents.scores[i * subject_count + j]) /
-                                   (double)new_doc_count;
+            cabinets.scores[(cab_s + cab_idx) * subject_count + sub_index] = 0.0;
         }
-        cabinets.doc_count[cab_idx] = new_doc_count;
     }
+
+    free(cabinet_document_counts);
 }
 
 void compute_best_local_cabinet_for_documents() {
-
+#pragma omp parallel for
     for (size_t d = doc_s; d < doc_e; d++) {
         double distance = 0;
-        size_t cab_idx = get_closest_local_cabinet_index(documents.parent_ids[d], &documents.scores[d * subject_count], &distance);
+        size_t cab_idx = get_closest_local_cabinet_index(
+            documents.parent_ids[d], &documents.scores[d * subject_count],
+            &distance);
         local_changes[d - doc_s] = (Change){cab_idx, distance};
     }
 }
 
-size_t get_closest_local_cabinet_index(size_t parent_id, double *document_scores, double* distance) {
+size_t get_closest_local_cabinet_index(size_t parent_id,
+                                       double *document_scores,
+                                       double *distance) {
     *distance = INFINITY;
 
     for (size_t j = cab_s; j < cab_e; j++) {
@@ -262,9 +291,7 @@ bool init_cabinets(Problem *problem) {
     cabinets.count = problem->cabinet_count;
     cabinets.scores = (double *)calloc(
         problem->cabinet_count * problem->subject_count, sizeof(double));
-    cabinets.doc_count = (size_t *)calloc(cabinets.count, sizeof(size_t));
-
-    return cabinets.scores && cabinets.doc_count;
+    return cabinets.scores;
 }
 
 bool init_documents(Problem *problem) {
@@ -356,31 +383,37 @@ void compute_comms() {
     int remain_col[2] = {1, 0};
     MPI_Cart_sub(cart_comm, remain_row, &row_comm);
     MPI_Cart_sub(cart_comm, remain_col, &col_comm);
+
+    MPI_Comm_free(&cart_comm);
 }
 
-void compute_partition(size_t total, int num_parts, int part_id, size_t *start, size_t *end, size_t *count) {
-    size_t base      = total / (size_t)num_parts;
+void compute_partition(size_t total, int num_parts, int part_id, size_t *start,
+                       size_t *end, size_t *count) {
+    size_t base = total / (size_t)num_parts;
     size_t remainder = total % (size_t)num_parts;
     size_t s = (size_t)part_id * base +
                ((size_t)part_id < remainder ? (size_t)part_id : remainder);
     size_t c = base + ((size_t)part_id < remainder ? 1 : 0);
     *start = s;
-    *end   = s + c;
+    *end = s + c;
     *count = c;
 }
 
 bool init_changes() {
     local_changes = (Change *)calloc(local_doc_count, sizeof(Change));
-    global_changes = (Change *)calloc(local_doc_count * grid_cols, sizeof(Change));
+    global_changes =
+        (Change *)calloc(local_doc_count * grid_cols, sizeof(Change));
     return local_changes && global_changes;
 }
 
 int assign_best_cabinet() {
-
     int swaps = 0;
-    memset(local_sum, 0, cabinets.count * subject_count * sizeof(double));
-    memset(local_count, 0, cabinets.count * sizeof(size_t));
+    memset(local_sum, 0, local_cab_count * subject_count * sizeof(double));
+    memset(local_count, 0, local_cab_count * sizeof(size_t));
 
+#pragma omp parallel for reduction(| : swaps)                    \
+    reduction(+ : local_sum[ : local_cab_count * subject_count], \
+                  local_count[ : local_cab_count])
     for (size_t d = 0; d < local_doc_count; d++) {
         size_t old_cab_idx = documents.parent_ids[doc_s + d];
         size_t new_cab_idx = old_cab_idx;
@@ -390,16 +423,20 @@ int assign_best_cabinet() {
             Change *entry = &global_changes[i * local_doc_count + d];
             if (entry->distance < min_distance) {
                 min_distance = entry->distance;
-                new_cab_idx  = entry->cab_idx;
+                new_cab_idx = entry->cab_idx;
             }
         }
 
-        if (new_cab_idx != old_cab_idx) swaps = 1;
         documents.parent_ids[doc_s + d] = new_cab_idx;
 
-        local_count[new_cab_idx]++;
+        if (new_cab_idx != old_cab_idx) swaps = 1;
+        if (new_cab_idx < cab_s || new_cab_idx >= cab_e) continue;
+
+        size_t arr_cab_index = new_cab_idx - cab_s;
+
+        local_count[arr_cab_index]++;
         for (int s = 0; s < subject_count; s++)
-            local_sum[new_cab_idx * subject_count + s] +=
+            local_sum[arr_cab_index * subject_count + s] +=
                 documents.scores[(doc_s + d) * subject_count + s];
     }
 
@@ -407,12 +444,11 @@ int assign_best_cabinet() {
 }
 
 bool init_sums_counts() {
+    local_count = calloc(local_cab_count, sizeof(size_t));
+    local_sum = calloc(local_cab_count * subject_count, sizeof(double));
 
-    local_count = calloc(cabinets.count, sizeof(size_t));
-    local_sum = calloc(cabinets.count * subject_count, sizeof(double));
+    global_count = calloc(local_cab_count, sizeof(size_t));
+    global_sum = calloc(local_cab_count * subject_count, sizeof(double));
 
-    global_count = calloc(cabinets.count, sizeof(size_t));
-    global_sum = calloc(cabinets.count * subject_count, sizeof(double));
-
-    return  local_count && local_sum && global_count && global_sum;
+    return local_count && local_sum && global_count && global_sum;
 }

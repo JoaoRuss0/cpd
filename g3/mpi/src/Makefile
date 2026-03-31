@@ -1,6 +1,6 @@
 export OMPI_CC=gcc-15
 CC=mpicc
-TARGETS=docs-mpi-checker docs-mpi-checker-omp docs-mpi-checker-full docs-mpi-row docs-mpi-row-omp
+TARGETS=docs-mpi-checker docs-mpi-row
 CFLAGS=-O2 -fopenmp
 
 .PHONY: all warn clean

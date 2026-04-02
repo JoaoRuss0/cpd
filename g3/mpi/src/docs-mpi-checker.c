@@ -9,7 +9,7 @@
 
 #define SEED 1234
 #define RAND_RANGE 10.0
-#define UNIF01 ((double) rand() / RAND_MAX)
+#define UNIF01 ((double)rand() / RAND_MAX)
 
 typedef struct Cabinets Cabinets;
 typedef struct Documents Documents;
@@ -96,6 +96,10 @@ size_t *global_count;
 double *global_sum;
 int global_swaps;
 
+int nthreads;
+size_t *thr_count;
+double *thr_sum;
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         return 1;
@@ -161,6 +165,8 @@ cleanup:
     if (local_sum) free(local_sum);
     if (global_count) free(global_count);
     if (global_sum) free(global_sum);
+    if (thr_count) free(thr_count);
+    if (thr_sum) free(thr_sum);
     if (row_comm != MPI_COMM_NULL) MPI_Comm_free(&row_comm);
     if (col_comm != MPI_COMM_NULL) MPI_Comm_free(&col_comm);
 
@@ -177,7 +183,7 @@ void recompute_scores() {
                    col_comm, &requests[1]);
     MPI_Waitall(2, requests, MPI_STATUS_IGNORE);
 
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (size_t c = 0; c < local_cab_count; c++)
         for (size_t s = 0; s < subject_count; s++)
             cabinets.scores[(cab_s + c) * subject_count + s] =
@@ -216,7 +222,7 @@ void assign_to_cabinets() {
     size_t *cabinet_document_counts = calloc(local_cab_count, sizeof(size_t));
     if (!cabinet_document_counts) return;
 
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (size_t i = 0; i < documents.count; i++) {
         size_t cab_idx = i % cabinets.count;
 
@@ -235,7 +241,7 @@ void assign_to_cabinets() {
         }
     }
 
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (size_t cab_idx = 0; cab_idx < local_cab_count; cab_idx++) {
         size_t doc_count = cabinet_document_counts[cab_idx];
         for (size_t sub_index = 0; sub_index < subject_count; sub_index++) {
@@ -254,7 +260,7 @@ void assign_to_cabinets() {
 }
 
 void compute_best_local_cabinet_for_documents() {
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (size_t d = doc_s; d < doc_e; d++) {
         double distance = 0;
         size_t cab_idx = get_closest_local_cabinet_index(
@@ -400,10 +406,15 @@ int assign_best_cabinet() {
     memset(local_sum, 0, local_cab_count * subject_count * sizeof(double));
     memset(local_count, 0, local_cab_count * sizeof(size_t));
 
-#pragma omp parallel for reduction(| : swaps)                    \
-    reduction(+ : local_sum[ : local_cab_count * subject_count], \
-                  local_count[ : local_cab_count])
+    memset(thr_count, 0, nthreads * local_cab_count * sizeof(size_t));
+    memset(thr_sum, 0, nthreads * local_cab_count * subject_count * sizeof(double));
+
+#pragma omp parallel for schedule(static) reduction(| : swaps)
     for (size_t d = 0; d < local_doc_count; d++) {
+        int tid = omp_get_thread_num();
+        size_t *my_count = &thr_count[tid * local_cab_count];
+        double *my_sum = &thr_sum[tid * local_cab_count * subject_count];
+
         size_t old_cab_idx = documents.parent_ids[doc_s + d];
         size_t new_cab_idx = old_cab_idx;
         double min_distance = INFINITY;
@@ -422,11 +433,20 @@ int assign_best_cabinet() {
         if (new_cab_idx < cab_s || new_cab_idx >= cab_e) continue;
 
         size_t arr_cab_index = new_cab_idx - cab_s;
-        local_count[arr_cab_index]++;
-
-        for (int s = 0; s < subject_count; s++)
-            local_sum[arr_cab_index * subject_count + s] +=
+        my_count[arr_cab_index]++;
+        for (size_t s = 0; s < subject_count; s++)
+            my_sum[arr_cab_index * subject_count + s] +=
                 documents.scores[(doc_s + d) * subject_count + s];
+    }
+
+#pragma omp parallel for schedule(static)
+    for (size_t c = 0; c < local_cab_count; c++) {
+        for (int t = 0; t < nthreads; t++) {
+            local_count[c] += thr_count[t * local_cab_count + c];
+            for (size_t s = 0; s < subject_count; s++)
+                local_sum[c * subject_count + s] +=
+                    thr_sum[t * local_cab_count * subject_count + c * subject_count + s];
+        }
     }
 
     return swaps;
@@ -439,5 +459,10 @@ bool init_sums_counts() {
     global_count = calloc(local_cab_count, sizeof(size_t));
     global_sum = calloc(local_cab_count * subject_count, sizeof(double));
 
-    return local_count && local_sum && global_count && global_sum;
+    nthreads = omp_get_max_threads();
+
+    thr_count = calloc(nthreads * local_cab_count, sizeof(size_t));
+    thr_sum = calloc(nthreads * local_cab_count * subject_count, sizeof(double));
+
+    return local_sum && local_count && global_count && global_sum && thr_count && thr_sum;
 }

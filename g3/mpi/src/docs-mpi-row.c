@@ -1,3 +1,10 @@
+//
+// Created by:
+//      João Russo  ist116543
+//      Juan Viteri ist115766
+//      Pedro Gomes ist1113468
+//
+
 #include <math.h>
 #include <mpi.h>
 #include <omp.h>
@@ -195,7 +202,8 @@ int reassign_documents() {
     memset(local_count, 0, cabinets.count * sizeof(size_t));
 
     memset(thr_count, 0, nthreads * cabinets.count * sizeof(size_t));
-    memset(thr_sum, 0, nthreads * cabinets.count * subject_count * sizeof(double));
+    memset(thr_sum, 0,
+           nthreads * cabinets.count * subject_count * sizeof(double));
 
 #pragma omp parallel for schedule(static) reduction(| : swaps)
     for (size_t d = doc_s; d < doc_e; d++) {
@@ -222,7 +230,8 @@ int reassign_documents() {
             local_count[c] += thr_count[t * cabinets.count + c];
             for (size_t s = 0; s < subject_count; s++)
                 local_sum[c * subject_count + s] +=
-                    thr_sum[t * cabinets.count * subject_count + c * subject_count + s];
+                    thr_sum[t * cabinets.count * subject_count +
+                            c * subject_count + s];
         }
     }
 
@@ -353,5 +362,6 @@ bool init_sums_and_counts() {
     thr_count = calloc(nthreads * cabinets.count, sizeof(size_t));
     thr_sum = calloc(nthreads * cabinets.count * subject_count, sizeof(double));
 
-    return local_sum && local_count && global_count && global_sum && thr_count && thr_sum;
+    return local_sum && local_count && global_count && global_sum &&
+           thr_count && thr_sum;
 }

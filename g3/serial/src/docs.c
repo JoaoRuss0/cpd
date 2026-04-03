@@ -1,3 +1,10 @@
+//
+// Created by:
+//      João Russo  ist116543
+//      Juan Viteri ist115766
+//      Pedro Gomes ist1113468
+//
+
 #include <math.h>
 #include <omp.h>
 #include <stdbool.h>
@@ -90,7 +97,8 @@ void assign_to_cabinets() {
         increment_cabinet_scores(cab_idx, i);
         documents.parent_ids[i] = cab_idx;
     }
-    memcpy(cabinets.scores, cabinets.temp_scores, cabinets.count * subject_count * sizeof(double));
+    memcpy(cabinets.scores, cabinets.temp_scores,
+           cabinets.count * subject_count * sizeof(double));
 }
 
 bool reassign_documents() {
@@ -106,7 +114,8 @@ bool reassign_documents() {
         increment_cabinet_scores(new_cab_idx, i);
         documents.parent_ids[i] = new_cab_idx;
     }
-    memcpy(cabinets.scores, cabinets.temp_scores, cabinets.count * subject_count * sizeof(double));
+    memcpy(cabinets.scores, cabinets.temp_scores,
+           cabinets.count * subject_count * sizeof(double));
 
     return swaps;
 }
@@ -132,8 +141,9 @@ void update_cabinets(size_t cab_idx, size_t doc_idx, int to_add) {
         }
 
         cabinets.temp_scores[idx] =
-            (cabinets.temp_scores[idx] * (double) doc_count + (double) to_add * documents.scores[doc_idx * subject_count + j])
-                / (double) new_doc_count;
+            (cabinets.temp_scores[idx] * (double)doc_count +
+             (double)to_add * documents.scores[doc_idx * subject_count + j]) /
+            (double)new_doc_count;
     }
     cabinets.doc_count[cab_idx] = new_doc_count;
 }
@@ -167,10 +177,10 @@ double calculate_distance(double *score_1, double *score_2) {
 
 bool init_cabinets(Problem *problem) {
     cabinets.count = problem->cabinet_count;
-    cabinets.scores =
-        (double *)calloc(problem->cabinet_count * problem->subject_count, sizeof(double));
-    cabinets.temp_scores =
-        (double *)calloc(problem->cabinet_count * problem->subject_count, sizeof(double));
+    cabinets.scores = (double *)calloc(
+        problem->cabinet_count * problem->subject_count, sizeof(double));
+    cabinets.temp_scores = (double *)calloc(
+        problem->cabinet_count * problem->subject_count, sizeof(double));
     cabinets.doc_count = (size_t *)calloc(cabinets.count, sizeof(size_t));
 
     return cabinets.scores && cabinets.doc_count && cabinets.temp_scores;

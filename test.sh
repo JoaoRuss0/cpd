@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
-MAKE_DIR="./g3/omp/src"
+MAKE_DIR="./omp/src"
 MAKE_TARGET=""
-DEFAULT_BINARY="./g3/omp/src/docs-omp"
+DEFAULT_BINARY="./omp/src/docs-omp"
 
 if [ $# -eq 0 ]; then
     echo "No binary provided. Building with make..."

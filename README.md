@@ -1,4 +1,4 @@
-# cpd
+# Parallel and Distributed Computing 
 
 Parallel document clustering (k-means-style) — IST CPD project.
 

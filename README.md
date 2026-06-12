@@ -33,7 +33,3 @@ mpirun -n 4 ./mpi/src/docs-mpi-row tests/T01/ex5-1d.in
 ./test.sh ./serial/src/docs            # test a specific binary
 ./test.sh mpirun -n 4 ./mpi/src/docs-mpi-row 1 2 3   # selected tests
 ```
-
-## Authors
-
-João Russo, Juan Viteri, Pedro Gomes.
